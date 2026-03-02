@@ -1,0 +1,417 @@
+﻿<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>BotChain Admin</title>
+  <style>
+    :root {
+      --bg: #f7f4ef;
+      --card: #ffffff;
+      --accent: #264653;
+      --accent-2: #2a9d8f;
+      --danger: #c1121f;
+      --text: #1b1f24;
+      --muted: #6b7280;
+      --line: #e8e3da;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Segoe UI", Tahoma, sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at 10% 10%, #fff8ec 0%, #f7f4ef 45%, #ede8df 100%);
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 16px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 8px 24px rgba(38, 70, 83, 0.08);
+    }
+
+    h1, h2, h3 { margin: 0 0 10px 0; }
+    h1 { font-size: 22px; color: var(--accent); }
+    h2 { font-size: 17px; color: var(--accent); }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: 1.1fr 1fr;
+    }
+
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 9px 12px;
+      color: #fff;
+      background: var(--accent);
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    button.secondary { background: var(--accent-2); }
+    button.danger { background: var(--danger); }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+    }
+
+    th, td {
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      padding: 8px 6px;
+      vertical-align: top;
+    }
+
+    th { color: var(--muted); font-weight: 700; }
+
+    .muted { color: var(--muted); }
+    .mono { font-family: Consolas, monospace; font-size: 12px; }
+    .status-pending { color: #b45309; font-weight: 700; }
+    .status-approved { color: #166534; font-weight: 700; }
+    .status-rejected { color: #b91c1c; font-weight: 700; }
+
+    #dialogs {
+      max-height: 280px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px;
+      background: #fff;
+    }
+
+    .msg { margin: 0 0 8px 0; }
+    .msg .head { font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="row" style="justify-content: space-between;">
+        <h1>BotChain Admin Panel</h1>
+        <div class="row">
+          <button class="secondary" id="refreshBtn">Обновить</button>
+          <button class="danger" id="logoutBtn">Выход</button>
+        </div>
+      </div>
+      <p class="muted" id="statusLine">Загрузка...</p>
+      <div class="row" id="stats"></div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Платежи</h2>
+        <div class="row">
+          <button id="showPending">Pending</button>
+          <button class="secondary" id="showAll">All</button>
+        </div>
+        <div style="overflow:auto; margin-top: 8px;">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>User</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="paymentsBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Детали платежа</h2>
+        <div id="paymentDetail" class="muted">Выберите платеж из списка.</div>
+        <div class="row" style="margin-top: 10px;">
+          <button class="secondary" id="approveBtn">Подтвердить оплату</button>
+          <button class="danger" id="rejectBtn">Отклонить</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h2>Пользователи</h2>
+        <div style="overflow:auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>User ID</th>
+                <th>Name</th>
+                <th>Username</th>
+                <th>Status</th>
+                <th>Dialog</th>
+              </tr>
+            </thead>
+            <tbody id="usersBody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Диалог пользователя</h2>
+        <p class="muted" id="dialogUser">Не выбран</p>
+        <div id="dialogs"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let selectedPaymentId = Number(new URLSearchParams(window.location.search).get("payment_id")) || null;
+    let currentStatusFilter = "pending";
+
+    async function api(path, options = {}) {
+      const headers = {
+        "Content-Type": "application/json",
+        ...(options.headers || {}),
+      };
+
+      const response = await fetch(path, { ...options, headers, credentials: "same-origin" });
+      if (!response.ok) {
+        if (response.status === 401) {
+          window.location.href = "/admin/login";
+          return;
+        }
+        const payload = await response.text();
+        throw new Error(payload || `HTTP ${response.status}`);
+      }
+
+      const ct = response.headers.get("content-type") || "";
+      if (ct.includes("application/json")) {
+        return response.json();
+      }
+      return response.text();
+    }
+
+    function setStatus(text) {
+      document.getElementById("statusLine").textContent = text;
+    }
+
+    function statusClass(status) {
+      return `status-${status}`;
+    }
+
+    function formatUsername(value) {
+      if (!value) return "-";
+      return `@${value}`;
+    }
+
+    function renderStats(stats) {
+      const holder = document.getElementById("stats");
+      holder.innerHTML = "";
+      Object.entries(stats).forEach(([key, value]) => {
+        const item = document.createElement("span");
+        item.className = "card";
+        item.style.padding = "6px 10px";
+        item.style.borderRadius = "10px";
+        item.innerHTML = `<strong>${key}</strong>: ${value}`;
+        holder.appendChild(item);
+      });
+    }
+
+    function renderPayments(payments) {
+      const body = document.getElementById("paymentsBody");
+      body.innerHTML = "";
+
+      payments.forEach((payment) => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${payment.id}</td>
+          <td>
+            ${payment.full_name}<br />
+            <span class="muted">${formatUsername(payment.username)} | ${payment.user_id}</span>
+          </td>
+          <td><span class="${statusClass(payment.status)}">${payment.status}</span></td>
+          <td class="mono">${payment.created_at}</td>
+          <td><button data-payment-id="${payment.id}">Открыть</button></td>
+        `;
+        body.appendChild(row);
+      });
+
+      body.querySelectorAll("button[data-payment-id]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          selectedPaymentId = Number(btn.dataset.paymentId);
+          loadPaymentDetail();
+        });
+      });
+    }
+
+    function renderUsers(users) {
+      const body = document.getElementById("usersBody");
+      body.innerHTML = "";
+
+      users.forEach((user) => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${user.user_id}</td>
+          <td>${user.full_name}</td>
+          <td>${formatUsername(user.username)}</td>
+          <td>${user.subscription_status}</td>
+          <td><button data-user-id="${user.user_id}">Открыть</button></td>
+        `;
+        body.appendChild(row);
+      });
+
+      body.querySelectorAll("button[data-user-id]").forEach((btn) => {
+        btn.addEventListener("click", () => loadUserDialog(Number(btn.dataset.userId)));
+      });
+    }
+
+    async function loadOverview() {
+      try {
+        setStatus("Загрузка данных...");
+        const data = await api("/api/overview");
+        renderStats(data.stats || {});
+        renderUsers(data.users || []);
+        if (currentStatusFilter === "pending") {
+          renderPayments(data.pending_payments || []);
+        } else {
+          await loadPayments("all", false);
+        }
+
+        setStatus("Данные обновлены");
+      } catch (err) {
+        setStatus(`Ошибка: ${err.message}`);
+      }
+    }
+
+    async function loadPayments(filter = "pending", withStatus = true) {
+      currentStatusFilter = filter;
+      try {
+        const url = withStatus ? `/api/payments?status=${encodeURIComponent(filter)}` : "/api/payments";
+        const payments = await api(url);
+        renderPayments(payments);
+      } catch (err) {
+        setStatus(`Ошибка загрузки платежей: ${err.message}`);
+      }
+    }
+
+    async function loadPaymentDetail() {
+      if (!selectedPaymentId) {
+        document.getElementById("paymentDetail").textContent = "Платеж не выбран";
+        return;
+      }
+
+      try {
+        const payment = await api(`/api/payments/${selectedPaymentId}`);
+        document.getElementById("paymentDetail").innerHTML = `
+          <p><strong>ID:</strong> ${payment.id}</p>
+          <p><strong>User:</strong> ${payment.full_name} (${formatUsername(payment.username)})</p>
+          <p><strong>User ID:</strong> ${payment.user_id}</p>
+          <p><strong>Status:</strong> <span class="${statusClass(payment.status)}">${payment.status}</span></p>
+          <p><strong>Type:</strong> ${payment.file_type}</p>
+          <p><strong>Caption:</strong> ${payment.caption || "-"}</p>
+          <p><strong>Created:</strong> <span class="mono">${payment.created_at}</span></p>
+          <p><strong>File ID:</strong> <span class="mono">${payment.file_id}</span></p>
+        `;
+      } catch (err) {
+        setStatus(`Ошибка деталей платежа: ${err.message}`);
+      }
+    }
+
+    async function loadUserDialog(userId) {
+      try {
+        document.getElementById("dialogUser").textContent = `User ID: ${userId}`;
+        const dialog = await api(`/api/users/${userId}/dialog`);
+        const root = document.getElementById("dialogs");
+        root.innerHTML = "";
+
+        dialog.forEach((entry) => {
+          const div = document.createElement("div");
+          div.className = "msg";
+          div.innerHTML = `
+            <div class="head">${entry.direction.toUpperCase()} | ${entry.created_at}</div>
+            <div>${entry.message_text}</div>
+          `;
+          root.appendChild(div);
+        });
+      } catch (err) {
+        setStatus(`Ошибка загрузки диалога: ${err.message}`);
+      }
+    }
+
+    async function approvePayment() {
+      if (!selectedPaymentId) {
+        alert("Выберите платеж");
+        return;
+      }
+
+      try {
+        await api(`/api/payments/${selectedPaymentId}/approve`, { method: "POST", body: "{}" });
+        setStatus(`Платеж ${selectedPaymentId} подтвержден`);
+        await loadOverview();
+        await loadPaymentDetail();
+      } catch (err) {
+        setStatus(`Ошибка подтверждения: ${err.message}`);
+      }
+    }
+
+    async function rejectPayment() {
+      if (!selectedPaymentId) {
+        alert("Выберите платеж");
+        return;
+      }
+
+      const reason = prompt("Причина отклонения", "Нечеткий скриншот") || "No reason provided";
+
+      try {
+        await api(`/api/payments/${selectedPaymentId}/reject`, {
+          method: "POST",
+          body: JSON.stringify({ reason }),
+        });
+        setStatus(`Платеж ${selectedPaymentId} отклонен`);
+        await loadOverview();
+        await loadPaymentDetail();
+      } catch (err) {
+        setStatus(`Ошибка отклонения: ${err.message}`);
+      }
+    }
+
+    async function logout() {
+      await api("/api/admin/logout", { method: "POST", body: "{}" });
+      window.location.href = "/admin/login";
+    }
+
+    document.getElementById("refreshBtn").addEventListener("click", () => loadOverview());
+    document.getElementById("showPending").addEventListener("click", () => loadPayments("pending", true));
+    document.getElementById("showAll").addEventListener("click", () => loadPayments("all", false));
+    document.getElementById("approveBtn").addEventListener("click", approvePayment);
+    document.getElementById("rejectBtn").addEventListener("click", rejectPayment);
+    document.getElementById("logoutBtn").addEventListener("click", logout);
+
+    loadOverview().then(() => {
+      if (selectedPaymentId) {
+        loadPaymentDetail();
+      }
+    });
+  </script>
+</body>
+</html>
