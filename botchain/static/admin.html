@@ -168,6 +168,20 @@
       color: var(--text);
     }
 
+    textarea {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: var(--surface);
+      color: var(--text);
+      width: 100%;
+      min-height: 110px;
+      resize: vertical;
+      font-family: Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
     input::placeholder {
       color: var(--muted);
     }
@@ -236,6 +250,7 @@
       <p class="muted" id="statusLine">Loading...</p>
       <div class="tabs" id="tabs">
         <button class="tab-btn active" data-tab="home">Home</button>
+        <button class="tab-btn" data-tab="messages">Messages</button>
         <button class="tab-btn" data-tab="channels">Channels</button>
         <button class="tab-btn" data-tab="users">Users</button>
         <button class="tab-btn" data-tab="payments">Payments</button>
@@ -269,6 +284,7 @@
         <div class="card">
           <h2>Quick Actions</h2>
           <div class="toolbar">
+            <button id="goMessages">Open messages</button>
             <button id="goChannels">Open channels</button>
             <button id="goUsers" class="secondary">Open users</button>
             <button id="goPayments">Open payments</button>
@@ -282,6 +298,32 @@
             <a id="premiumFolderLinkOpen" href="#" target="_blank" rel="noopener">Open link</a>
             <button id="copyPremiumLinkBtn" class="secondary">Copy link</button>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="section-messages" class="section">
+      <div class="card">
+        <div class="row space-between">
+          <h2>Bot Messages</h2>
+          <span class="muted" id="messagesCount"></span>
+        </div>
+        <div class="toolbar" style="margin-bottom: 10px;">
+          <input id="messagesSearch" type="text" placeholder="Search: title, key, description, text" />
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Template</th>
+                <th>Description</th>
+                <th>Placeholders</th>
+                <th>Text</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="messagesBody"></tbody>
+          </table>
         </div>
       </div>
     </section>
@@ -444,12 +486,14 @@
       payments: [],
       pendingPayments: [],
       managedChats: [],
+      messageTemplates: [],
       stats: {},
       premiumFolderLink: "",
       usersSearch: "",
       usersStatus: "all",
       paymentsSearch: "",
       paymentsStatus: "all",
+      messagesSearch: "",
     };
 
     async function api(path, options = {}) {
@@ -565,6 +609,85 @@
       }
       openLink.setAttribute("href", state.premiumFolderLink);
       openLink.classList.remove("hidden");
+    }
+
+    function getFilteredMessageTemplates() {
+      const query = state.messagesSearch.trim().toLowerCase();
+      return (state.messageTemplates || []).filter((template) => {
+        if (!query) return true;
+        const placeholderTokens = (template.placeholders || []).map((item) => `{${item}}`).join(" ");
+        const haystack = [
+          template.key,
+          template.title,
+          template.description,
+          template.value,
+          placeholderTokens,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return haystack.includes(query);
+      });
+    }
+
+    async function saveMessageTemplate(templateKey, value) {
+      const payloadValue = String(value ?? "");
+      if (!payloadValue.trim()) {
+        setStatus("Message template must not be empty");
+        return;
+      }
+      try {
+        const response = await api(`/api/settings/bot-messages/${encodeURIComponent(templateKey)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ value: payloadValue }),
+        });
+        const updated = response.template || {};
+        const index = state.messageTemplates.findIndex((item) => item.key === templateKey);
+        if (index >= 0) {
+          state.messageTemplates[index] = {
+            ...state.messageTemplates[index],
+            ...updated,
+            key: templateKey,
+          };
+        }
+        renderMessageTemplates();
+        setStatus(`Template saved: ${templateKey}`);
+      } catch (err) {
+        setStatus(`Template save error (${templateKey}): ${err.message}`);
+      }
+    }
+
+    function renderMessageTemplates() {
+      const templates = getFilteredMessageTemplates();
+      document.getElementById("messagesCount").textContent = `Shown: ${templates.length}`;
+      const body = document.getElementById("messagesBody");
+      body.innerHTML = "";
+
+      if (!templates.length) {
+        body.innerHTML = `<tr><td colspan="5" class="muted">No message templates found.</td></tr>`;
+        return;
+      }
+
+      templates.forEach((template) => {
+        const placeholders = (template.placeholders || []).map((item) => `{${item}}`).join(", ") || "-";
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>
+            <strong>${escapeHtml(template.title || template.key)}</strong><br>
+            <span class="mono">${escapeHtml(template.key)}</span>
+          </td>
+          <td class="muted">${escapeHtml(template.description || "-")}</td>
+          <td class="mono">${escapeHtml(placeholders)}</td>
+          <td><textarea data-template-key="${escapeHtml(template.key)}"></textarea></td>
+          <td><button data-template-save="${escapeHtml(template.key)}">Save</button></td>
+        `;
+
+        const textarea = row.querySelector("textarea");
+        const saveBtn = row.querySelector("button[data-template-save]");
+        textarea.value = template.value || "";
+        saveBtn.addEventListener("click", () => saveMessageTemplate(template.key, textarea.value));
+        body.appendChild(row);
+      });
     }
 
     async function savePremiumFolderLink() {
@@ -1010,10 +1133,11 @@
     async function loadData() {
       try {
         setStatus("Loading data...");
-        const [overview, payments, managedChats] = await Promise.all([
+        const [overview, payments, managedChats, messageTemplates] = await Promise.all([
           api("/api/overview"),
           api("/api/payments"),
           api("/api/managed-chats"),
+          api("/api/settings/bot-messages"),
         ]);
 
         state.stats = overview.stats || {};
@@ -1022,10 +1146,12 @@
         state.premiumFolderLink = overview.premium_folder_link || "";
         state.payments = payments || [];
         state.managedChats = managedChats || [];
+        state.messageTemplates = messageTemplates || [];
 
         renderStats();
         renderPendingHome();
         renderPremiumFolderLink();
+        renderMessageTemplates();
         renderManagedChats();
         renderUsers();
         renderPayments();
@@ -1049,6 +1175,7 @@
       switchTab(btn.dataset.tab);
     });
 
+    document.getElementById("goMessages").addEventListener("click", () => switchTab("messages"));
     document.getElementById("goChannels").addEventListener("click", () => switchTab("channels"));
     document.getElementById("goUsers").addEventListener("click", () => switchTab("users"));
     document.getElementById("goPayments").addEventListener("click", () => switchTab("payments"));
@@ -1097,6 +1224,11 @@
     document.getElementById("paymentsStatusFilter").addEventListener("change", (event) => {
       state.paymentsStatus = event.target.value;
       renderPayments();
+    });
+
+    document.getElementById("messagesSearch").addEventListener("input", (event) => {
+      state.messagesSearch = event.target.value;
+      renderMessageTemplates();
     });
 
     switchTab(state.activeTab);

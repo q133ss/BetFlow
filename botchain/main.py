@@ -49,9 +49,10 @@ async def run() -> None:
                 await telegram_app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
                 bot_polling = True
                 try:
+                    startup_text = await db.get_bot_message_template("bot_online_text")
                     await telegram_app.bot.send_message(
                         chat_id=settings.admin_telegram_id,
-                        text="Bot is online.",
+                        text=startup_text,
                     )
                 except Exception as exc:
                     print(f"WARNING: failed to send startup admin message: {exc}")

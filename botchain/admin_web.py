@@ -51,6 +51,10 @@ class PremiumFolderLinkPayload(BaseModel):
     value: str
 
 
+class BotMessageTemplatePayload(BaseModel):
+    value: str
+
+
 def _is_authenticated(request: Request) -> bool:
     return bool(request.session.get("is_admin"))
 
@@ -66,6 +70,10 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
 
     admin_html_path = Path(__file__).parent / "static" / "admin.html"
     login_html_path = Path(__file__).parent / "static" / "login.html"
+
+    async def bot_message_text(template_key: str, **kwargs: Any) -> str:
+        template = await db.get_bot_message_template(template_key)
+        return texts.render_template(template, **kwargs)
 
     async def require_admin(request: Request) -> dict[str, Any]:
         if not _is_authenticated(request):
@@ -147,6 +155,24 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
         await db.set_premium_folder_link(link)
         return {"ok": True, "premium_folder_link": link}
 
+    @app.get("/api/settings/bot-messages")
+    async def list_bot_messages(_: dict[str, Any] = Depends(require_admin)) -> list[dict[str, Any]]:
+        return await db.list_bot_message_templates()
+
+    @app.patch("/api/settings/bot-messages/{template_key}")
+    async def update_bot_message(
+        template_key: str,
+        payload: BotMessageTemplatePayload,
+        _: dict[str, Any] = Depends(require_admin),
+    ) -> dict[str, Any]:
+        if not texts.is_known_bot_message_key(template_key):
+            raise HTTPException(status_code=404, detail="Message template not found")
+        value = payload.value.strip()
+        if not value:
+            raise HTTPException(status_code=400, detail="Message template must not be empty")
+        template = await db.set_bot_message_template(template_key=template_key, value=value)
+        return {"ok": True, "template": template}
+
     @app.get("/api/managed-chats")
     async def managed_chats(
         only_active: bool = Query(default=False),
@@ -220,7 +246,7 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
             if removed:
                 await db.set_user_channel_memberships(user_id=user_id, chat_ids=removed, is_member=False)
 
-        message = texts.CANCELED_BY_ADMIN_TEMPLATE.format(reason=reason)
+        message = await bot_message_text("canceled_by_admin_template", reason=reason)
         try:
             await bot.send_message(chat_id=user_id, text=message, disable_web_page_preview=True)
             await db.log_dialog(user_id, "out", message)
@@ -270,7 +296,8 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
             )
 
         premium_folder_link = await db.get_premium_folder_link()
-        message = texts.ASSIGNED_BY_ADMIN_TEMPLATE.format(
+        message = await bot_message_text(
+            "assigned_by_admin_template",
             days=payload.days,
             premium_link=premium_folder_link,
         )
@@ -385,7 +412,7 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
             )
 
         premium_folder_link = await db.get_premium_folder_link()
-        message = texts.APPROVED_TEMPLATE.format(premium_link=premium_folder_link)
+        message = await bot_message_text("approved_template", premium_link=premium_folder_link)
         await bot.send_message(
             chat_id=user_id,
             text=message,
@@ -407,7 +434,7 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
             raise HTTPException(status_code=400, detail="Payment already processed or missing")
 
         user_id = int(reviewed["user_id"])
-        message = texts.REJECTED_TEMPLATE.format(reason=reason)
+        message = await bot_message_text("rejected_template", reason=reason)
         await bot.send_message(chat_id=user_id, text=message)
         await db.log_dialog(user_id, "out", message)
 

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import aiosqlite
+from . import texts
 
 UTC = timezone.utc
 REMINDER_COLUMN_BY_DAYS = {
@@ -118,12 +119,17 @@ class Database:
     async def _ensure_default_settings(self) -> None:
         assert self._db is not None
         now = utcnow().isoformat()
-        await self._db.execute(
+        default_settings = [("premium_folder_link", "https://t.me/+replace_me", now)]
+        default_settings.extend(
+            (texts.bot_message_setting_key(key), value, now)
+            for key, value in texts.BOT_MESSAGE_DEFAULTS.items()
+        )
+        await self._db.executemany(
             """
             INSERT OR IGNORE INTO app_settings (key, value, updated_at)
-            VALUES ('premium_folder_link', 'https://t.me/+replace_me', ?)
+            VALUES (?, ?, ?)
             """,
-            (now,),
+            default_settings,
         )
 
     @staticmethod
@@ -627,6 +633,66 @@ class Database:
 
     async def set_premium_folder_link(self, link: str) -> None:
         await self.set_setting("premium_folder_link", link.strip())
+
+    async def get_bot_message_template(self, template_key: str) -> str:
+        if not texts.is_known_bot_message_key(template_key):
+            raise ValueError(f"Unknown bot message template: {template_key}")
+
+        value = await self.get_setting(texts.bot_message_setting_key(template_key))
+        if value and value.strip():
+            return value
+        return texts.BOT_MESSAGE_DEFAULTS[template_key]
+
+    async def list_bot_message_templates(self) -> list[dict[str, Any]]:
+        assert self._db is not None
+        async with self._db.execute(
+            """
+            SELECT key, value, updated_at
+            FROM app_settings
+            WHERE key LIKE ?
+            ORDER BY key ASC
+            """,
+            (f"{texts.BOT_MESSAGE_PREFIX}%",),
+        ) as cur:
+            rows = await cur.fetchall()
+
+        value_by_key: dict[str, str] = {}
+        updated_by_key: dict[str, str] = {}
+        for row in rows:
+            setting_key = str(row["key"])
+            template_key = setting_key[len(texts.BOT_MESSAGE_PREFIX) :]
+            value_by_key[template_key] = str(row["value"])
+            updated_by_key[template_key] = str(row["updated_at"])
+
+        templates: list[dict[str, Any]] = []
+        for definition in texts.BOT_MESSAGE_DEFINITIONS:
+            key = str(definition["key"])
+            templates.append(
+                {
+                    "key": key,
+                    "title": str(definition["title"]),
+                    "description": str(definition["description"]),
+                    "placeholders": list(definition["placeholders"]),
+                    "value": value_by_key.get(key, texts.BOT_MESSAGE_DEFAULTS[key]),
+                    "updated_at": updated_by_key.get(key),
+                }
+            )
+        return templates
+
+    async def set_bot_message_template(self, template_key: str, value: str) -> dict[str, Any]:
+        if not texts.is_known_bot_message_key(template_key):
+            raise ValueError(f"Unknown bot message template: {template_key}")
+
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("Message template must not be empty")
+
+        await self.set_setting(texts.bot_message_setting_key(template_key), cleaned)
+        templates = await self.list_bot_message_templates()
+        for item in templates:
+            if item["key"] == template_key:
+                return item
+        raise RuntimeError(f"Template was not persisted: {template_key}")
 
     async def get_managed_chat(self, chat_id: int) -> dict[str, Any] | None:
         assert self._db is not None

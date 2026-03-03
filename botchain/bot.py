@@ -15,39 +15,49 @@ from telegram.ext import (
     filters,
 )
 
+from . import texts
 from .config import Settings
 from .db import Database, utcnow
 from .membership import ban_user_from_chats
-from . import texts
 
 
-def start_keyboard() -> InlineKeyboardMarkup:
+def start_keyboard(button_text: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("Subscribe", callback_data="subscribe")]]
+        [[InlineKeyboardButton(button_text, callback_data="subscribe")]]
     )
 
 
-def subscribe_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data="cancel")]])
+def subscribe_keyboard(button_text: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton(button_text, callback_data="cancel")]])
 
 
-def format_info(user: dict[str, Any]) -> str:
-    status = "Subscribed" if user.get("subscription_status") == "subscribed" else "Not Subscribed"
+async def _message_text(db: Database, key: str, **kwargs: Any) -> str:
+    template = await db.get_bot_message_template(key)
+    return texts.render_template(template, **kwargs)
+
+
+async def format_info(db: Database, user: dict[str, Any]) -> str:
+    status_key = (
+        "info_status_subscribed"
+        if user.get("subscription_status") == "subscribed"
+        else "info_status_not_subscribed"
+    )
+    status = await db.get_bot_message_template(status_key)
     start_date = _fmt_dt(user.get("subscription_start_at"))
     end_date = _fmt_dt(user.get("subscription_end_at"))
 
     username = user.get("username")
     username_line = f"@{username}" if username else "-"
 
-    return (
-        "✨ User Details ✨\n\n"
-        f"Full Name: {user.get('full_name', '-')}\n\n"
-        f"Username: {username_line}\n\n"
-        f"User ID: {user.get('user_id', '-')}\n\n"
-        "Subscription Details:\n\n"
-        f"Status: {status}\n\n"
-        f"⏳ Start Date:\n{start_date}\n\n"
-        f"End Date:\n{end_date}"
+    return await _message_text(
+        db,
+        "info_template",
+        full_name=user.get("full_name", "-"),
+        username=username_line,
+        user_id=user.get("user_id", "-"),
+        status=status,
+        start_date=start_date,
+        end_date=end_date,
     )
 
 
@@ -105,8 +115,9 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if update.message:
         await db.log_dialog(user_id, "in", update.message.text or "/start")
 
-    text = texts.START_TEMPLATE.format(first_name=first_name)
-    await send_and_log(context, db, user_id, text, reply_markup=start_keyboard())
+    text = await _message_text(db, "start_template", first_name=first_name)
+    start_button_text = await db.get_bot_message_template("start_button_text")
+    await send_and_log(context, db, user_id, text, reply_markup=start_keyboard(start_button_text))
 
 
 async def subscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -119,7 +130,15 @@ async def subscribe_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await db.log_dialog(user_id, "in", update.message.text or "/subscribe")
 
     await db.set_awaiting_receipt(user_id, hours=5)
-    await send_and_log(context, db, user_id, texts.SUBSCRIBE_TEXT, reply_markup=subscribe_keyboard())
+    subscribe_text = await db.get_bot_message_template("subscribe_text")
+    cancel_button_text = await db.get_bot_message_template("cancel_button_text")
+    await send_and_log(
+        context,
+        db,
+        user_id,
+        subscribe_text,
+        reply_markup=subscribe_keyboard(cancel_button_text),
+    )
 
 
 async def info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -135,7 +154,7 @@ async def info_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if not user:
         return
 
-    await send_and_log(context, db, user_id, format_info(user))
+    await send_and_log(context, db, user_id, await format_info(db, user))
 
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -151,13 +170,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if query.data == "subscribe":
         await db.set_awaiting_receipt(user_id, hours=5)
-        await send_and_log(context, db, user_id, texts.SUBSCRIBE_TEXT, reply_markup=subscribe_keyboard())
+        subscribe_text = await db.get_bot_message_template("subscribe_text")
+        cancel_button_text = await db.get_bot_message_template("cancel_button_text")
+        await send_and_log(
+            context,
+            db,
+            user_id,
+            subscribe_text,
+            reply_markup=subscribe_keyboard(cancel_button_text),
+        )
         return
 
     if query.data == "cancel":
         await db.clear_awaiting_receipt(user_id)
-        msg = "Subscription flow canceled. Send /subscribe when you're ready."
-        await send_and_log(context, db, user_id, msg, reply_markup=start_keyboard())
+        msg = await db.get_bot_message_template("subscription_flow_canceled_text")
+        start_button_text = await db.get_bot_message_template("start_button_text")
+        await send_and_log(context, db, user_id, msg, reply_markup=start_keyboard(start_button_text))
         return
 
 
@@ -192,7 +220,7 @@ async def receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             context,
             db,
             user_id,
-            "Please send /subscribe first, then upload your receipt.",
+            await db.get_bot_message_template("subscribe_first_before_receipt_text"),
         )
         return
 
@@ -207,7 +235,7 @@ async def receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             context,
             db,
             user_id,
-            "Receipt window expired. Send /subscribe to request a new payment session.",
+            await db.get_bot_message_template("receipt_window_expired_text"),
         )
         return
 
@@ -216,7 +244,7 @@ async def receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             context,
             db,
             user_id,
-            "Could not read the receipt. Please send it as a photo or document.",
+            await db.get_bot_message_template("receipt_unreadable_text"),
         )
         return
 
@@ -228,20 +256,24 @@ async def receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
     await db.clear_awaiting_receipt(user_id)
 
-    await send_and_log(context, db, user_id, texts.RECEIPT_ACCEPTED_TEXT)
+    await send_and_log(context, db, user_id, await db.get_bot_message_template("receipt_accepted_text"))
 
     admin_url = f"{settings.public_admin_url}/admin?payment_id={payment_id}"
     receipt_text = _truncate(caption or "Not provided", 400)
-    admin_caption = (
-        "New payment request.\n\n"
-        f"Payment ID: {payment_id}\n"
-        f"User: {user.get('full_name')}\n"
-        f"Username: {('@' + user.get('username')) if user.get('username') else '-'}\n"
-        f"User ID: {user_id}\n\n"
-        f"Admin panel link: {admin_url}\n\n"
-        f"Receipt text:\n{receipt_text}"
+    admin_caption = await _message_text(
+        db,
+        "admin_new_payment_template",
+        payment_id=payment_id,
+        full_name=user.get("full_name") or "-",
+        username=("@"+user.get("username")) if user.get("username") else "-",
+        user_id=user_id,
+        admin_url=admin_url,
+        receipt_text=receipt_text,
     )
-    admin_markup = InlineKeyboardMarkup([[InlineKeyboardButton("Open admin panel", url=admin_url)]])
+    admin_caption = _truncate(admin_caption, 1024)
+    admin_button_text = await db.get_bot_message_template("open_admin_panel_button_text")
+    admin_markup = InlineKeyboardMarkup([[InlineKeyboardButton(admin_button_text, url=admin_url)]])
+    open_admin_panel_text = await _message_text(db, "open_admin_panel_message_template", admin_url=admin_url)
 
     try:
         if file_type == "photo":
@@ -259,7 +291,7 @@ async def receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         try:
             await context.bot.send_message(
                 chat_id=settings.admin_telegram_id,
-                text=f"Open admin panel: {admin_url}",
+                text=open_admin_panel_text,
                 reply_markup=admin_markup,
                 disable_web_page_preview=True,
             )
@@ -269,7 +301,7 @@ async def receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
             await context.bot.send_message(
                 chat_id=settings.admin_telegram_id,
-                text=f"Open admin panel: {admin_url}",
+                text=open_admin_panel_text,
                 disable_web_page_preview=True,
             )
         await db.log_dialog(user_id, "system", f"admin_notified:payment_id={payment_id}")
@@ -295,7 +327,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         context,
         db,
         user_id,
-        "Send /subscribe to buy access or /info to view your subscription details.",
+        await db.get_bot_message_template("default_help_text"),
     )
 
 
@@ -392,10 +424,13 @@ async def chat_member_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             await context.bot.send_message(
                 chat_id=settings.admin_telegram_id,
                 text=(
-                    "Membership enforcement error.\n"
-                    f"User ID: {user_id}\n"
-                    f"Chat ID: {event.chat.id}\n"
-                    f"Errors: {_format_chat_errors(failed)}"
+                    await _message_text(
+                        db,
+                        "membership_enforcement_error_template",
+                        user_id=user_id,
+                        chat_id=event.chat.id,
+                        errors=_format_chat_errors(failed),
+                    )
                 )[:4000],
             )
         except Exception as notify_exc:
@@ -431,6 +466,7 @@ async def process_subscription_expiry_reminders(app: Application) -> None:
     now = utcnow()
 
     for days_before_end in (3, 2, 1):
+        reminder_template = await db.get_bot_message_template("subscription_expiring_template")
         min_end_iso = (now + timedelta(days=days_before_end - 1)).isoformat()
         max_end_iso = (now + timedelta(days=days_before_end)).isoformat()
         candidates = await db.list_subscription_reminder_candidates(
@@ -441,7 +477,7 @@ async def process_subscription_expiry_reminders(app: Application) -> None:
         )
         for user in candidates:
             user_id = int(user["user_id"])
-            text = texts.SUBSCRIPTION_EXPIRING_TEMPLATE.format(days=days_before_end)
+            text = texts.render_template(reminder_template, days=days_before_end)
             try:
                 await app.bot.send_message(chat_id=user_id, text=text)
                 await db.log_dialog(user_id, "out", text)
@@ -463,6 +499,8 @@ async def process_subscription_expiry_reminders(app: Application) -> None:
 async def process_expired_subscriptions(app: Application) -> None:
     db: Database = app.bot_data["db"]
     settings: Settings = app.bot_data["settings"]
+    expired_template = await db.get_bot_message_template("subscription_expired_template")
+    admin_expired_template = await db.get_bot_message_template("admin_subscription_expired_template")
     managed_chat_ids = await db.list_managed_chat_ids(only_active=True)
 
     expired = await db.list_expired_subscriptions(now_iso=utcnow().isoformat(), limit=200)
@@ -485,8 +523,8 @@ async def process_expired_subscriptions(app: Application) -> None:
         )
 
         try:
-            await app.bot.send_message(chat_id=user_id, text=texts.SUBSCRIPTION_EXPIRED_TEMPLATE)
-            await db.log_dialog(user_id, "out", texts.SUBSCRIPTION_EXPIRED_TEMPLATE)
+            await app.bot.send_message(chat_id=user_id, text=expired_template)
+            await db.log_dialog(user_id, "out", expired_template)
         except Exception as exc:
             await db.log_dialog(
                 user_id,
@@ -494,7 +532,8 @@ async def process_expired_subscriptions(app: Application) -> None:
                 f"subscription_expired_notify_failed:user_id={user_id};error={exc}"[:4000],
             )
 
-        admin_text = texts.ADMIN_SUBSCRIPTION_EXPIRED_TEMPLATE.format(
+        admin_text = texts.render_template(
+            admin_expired_template,
             full_name=user.get("full_name") or "-",
             username=_format_username(user.get("username")),
             user_id=user_id,
