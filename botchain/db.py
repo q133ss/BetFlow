@@ -75,9 +75,30 @@ class Database:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS user_channel_memberships (
+                user_id INTEGER NOT NULL,
+                chat_id INTEGER NOT NULL,
+                is_member INTEGER NOT NULL DEFAULT 1,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, chat_id),
+                FOREIGN KEY (user_id) REFERENCES users(user_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_user_channel_memberships_chat_member
+            ON user_channel_memberships (chat_id, is_member);
+
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             """
         )
         await self._ensure_users_reminder_columns()
+        await self._ensure_default_settings()
         await self._db.commit()
 
     async def _ensure_users_reminder_columns(self) -> None:
@@ -93,6 +114,17 @@ class Database:
         for column_name, column_type in required_columns.items():
             if column_name not in existing_columns:
                 await self._db.execute(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}")
+
+    async def _ensure_default_settings(self) -> None:
+        assert self._db is not None
+        now = utcnow().isoformat()
+        await self._db.execute(
+            """
+            INSERT OR IGNORE INTO app_settings (key, value, updated_at)
+            VALUES ('premium_folder_link', 'https://t.me/+replace_me', ?)
+            """,
+            (now,),
+        )
 
     @staticmethod
     def _reminder_column(days_before_end: int) -> str:
@@ -134,6 +166,23 @@ class Database:
         ) as cur:
             rows = await cur.fetchall()
         return [dict(row) for row in rows]
+
+    async def has_active_subscription(self, user_id: int, now_iso: str | None = None) -> bool:
+        assert self._db is not None
+        effective_now = now_iso or utcnow().isoformat()
+        async with self._db.execute(
+            """
+            SELECT 1
+            FROM users
+            WHERE user_id = ?
+              AND subscription_status = 'subscribed'
+              AND (subscription_end_at IS NULL OR subscription_end_at > ?)
+            LIMIT 1
+            """,
+            (user_id, effective_now),
+        ) as cur:
+            row = await cur.fetchone()
+        return bool(row)
 
     async def set_awaiting_receipt(self, user_id: int, hours: int = 5) -> str:
         assert self._db is not None
@@ -547,6 +596,51 @@ class Database:
         chats = await self.list_managed_chats(only_active=only_active)
         return [int(chat["chat_id"]) for chat in chats]
 
+    async def get_setting(self, key: str) -> str | None:
+        assert self._db is not None
+        async with self._db.execute(
+            "SELECT value FROM app_settings WHERE key = ?",
+            (key,),
+        ) as cur:
+            row = await cur.fetchone()
+        return str(row["value"]) if row else None
+
+    async def set_setting(self, key: str, value: str) -> None:
+        assert self._db is not None
+        now = utcnow().isoformat()
+        async with self._lock:
+            await self._db.execute(
+                """
+                INSERT INTO app_settings (key, value, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    value = excluded.value,
+                    updated_at = excluded.updated_at
+                """,
+                (key, value, now),
+            )
+            await self._db.commit()
+
+    async def get_premium_folder_link(self) -> str:
+        value = await self.get_setting("premium_folder_link")
+        return value or "https://t.me/+replace_me"
+
+    async def set_premium_folder_link(self, link: str) -> None:
+        await self.set_setting("premium_folder_link", link.strip())
+
+    async def get_managed_chat(self, chat_id: int) -> dict[str, Any] | None:
+        assert self._db is not None
+        async with self._db.execute(
+            """
+            SELECT chat_id, title, username, is_active, created_at, updated_at
+            FROM managed_chats
+            WHERE chat_id = ?
+            """,
+            (int(chat_id),),
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
     async def add_managed_chat(
         self,
         chat_id: int,
@@ -622,6 +716,100 @@ class Database:
             cur = await self._db.execute("DELETE FROM managed_chats WHERE chat_id = ?", (int(chat_id),))
             await self._db.commit()
         return bool(cur.rowcount)
+
+    async def touch_managed_chat_from_event(
+        self,
+        chat_id: int,
+        title: str | None = None,
+        username: str | None = None,
+    ) -> dict[str, Any]:
+        assert self._db is not None
+        now = utcnow().isoformat()
+        clean_title = (title or "").strip() or None
+        clean_username = (username or "").strip().lstrip("@") or None
+
+        async with self._lock:
+            await self._db.execute(
+                """
+                INSERT INTO managed_chats (chat_id, title, username, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, 1, ?, ?)
+                ON CONFLICT(chat_id) DO UPDATE SET
+                    title = COALESCE(excluded.title, managed_chats.title),
+                    username = COALESCE(excluded.username, managed_chats.username),
+                    updated_at = excluded.updated_at
+                """,
+                (int(chat_id), clean_title, clean_username, now, now),
+            )
+            await self._db.commit()
+
+        chat = await self.get_managed_chat(chat_id=int(chat_id))
+        if not chat:
+            raise RuntimeError("managed chat touch failed")
+        return chat
+
+    async def set_user_channel_membership(self, user_id: int, chat_id: int, is_member: bool) -> None:
+        assert self._db is not None
+        now = utcnow().isoformat()
+        member_flag = 1 if is_member else 0
+        async with self._lock:
+            await self._db.execute(
+                """
+                INSERT INTO user_channel_memberships
+                (user_id, chat_id, is_member, first_seen_at, last_seen_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, chat_id) DO UPDATE SET
+                    is_member = excluded.is_member,
+                    last_seen_at = excluded.last_seen_at,
+                    updated_at = excluded.updated_at
+                """,
+                (int(user_id), int(chat_id), member_flag, now, now, now),
+            )
+            await self._db.commit()
+
+    async def set_user_channel_memberships(self, user_id: int, chat_ids: list[int], is_member: bool) -> None:
+        assert self._db is not None
+        if not chat_ids:
+            return
+        now = utcnow().isoformat()
+        member_flag = 1 if is_member else 0
+        payload = [
+            (int(user_id), int(chat_id), member_flag, now, now, now)
+            for chat_id in chat_ids
+        ]
+        async with self._lock:
+            await self._db.executemany(
+                """
+                INSERT INTO user_channel_memberships
+                (user_id, chat_id, is_member, first_seen_at, last_seen_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id, chat_id) DO UPDATE SET
+                    is_member = excluded.is_member,
+                    last_seen_at = excluded.last_seen_at,
+                    updated_at = excluded.updated_at
+                """,
+                payload,
+            )
+            await self._db.commit()
+
+    async def list_user_channel_chat_ids(self, user_id: int, only_active: bool = True) -> list[int]:
+        assert self._db is not None
+        if only_active:
+            query = """
+                SELECT chat_id
+                FROM user_channel_memberships
+                WHERE user_id = ? AND is_member = 1
+                ORDER BY chat_id ASC
+            """
+        else:
+            query = """
+                SELECT chat_id
+                FROM user_channel_memberships
+                WHERE user_id = ?
+                ORDER BY chat_id ASC
+            """
+        async with self._db.execute(query, (int(user_id),)) as cur:
+            rows = await cur.fetchall()
+        return [int(row["chat_id"]) for row in rows]
 
     async def user_has_subscription_history(self, user_id: int) -> bool:
         assert self._db is not None

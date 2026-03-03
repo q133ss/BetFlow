@@ -4,10 +4,11 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Any
 
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import Chat, ChatMember, ChatMemberUpdated, InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
+    ChatMemberHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -76,13 +77,14 @@ async def send_and_log(
     text: str,
     reply_markup: InlineKeyboardMarkup | None = None,
     parse_mode: str | None = None,
+    disable_web_page_preview: bool = True,
 ) -> None:
     await context.bot.send_message(
         chat_id=user_id,
         text=text,
         reply_markup=reply_markup,
         parse_mode=parse_mode,
-        disable_web_page_preview=True,
+        disable_web_page_preview=disable_web_page_preview,
     )
     await db.log_dialog(user_id, "out", text)
 
@@ -297,6 +299,113 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
+def _is_active_chat_member(member: ChatMember) -> bool:
+    if member.status in {"creator", "administrator", "member"}:
+        return True
+    if member.status == "restricted":
+        return bool(getattr(member, "is_member", False))
+    return False
+
+
+def _is_supported_membership_chat(chat: Chat) -> bool:
+    return chat.type in {Chat.CHANNEL, Chat.SUPERGROUP, Chat.GROUP}
+
+
+def _member_full_name(chat_member_update: ChatMemberUpdated) -> str:
+    user = chat_member_update.new_chat_member.user
+    return " ".join(part for part in [user.first_name, user.last_name] if part).strip() or "Unknown"
+
+
+async def my_chat_member_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    db: Database = context.application.bot_data["db"]
+    event = update.my_chat_member
+    if not event or not _is_supported_membership_chat(event.chat):
+        return
+
+    chat = await db.touch_managed_chat_from_event(
+        chat_id=event.chat.id,
+        title=event.chat.title,
+        username=event.chat.username,
+    )
+    is_active = _is_active_chat_member(event.new_chat_member)
+
+    if is_active and int(chat["is_active"]) != 1:
+        await db.set_managed_chat_active(chat_id=event.chat.id, is_active=True)
+    if not is_active and int(chat["is_active"]) == 1:
+        await db.set_managed_chat_active(chat_id=event.chat.id, is_active=False)
+
+
+async def chat_member_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    db: Database = context.application.bot_data["db"]
+    settings: Settings = context.application.bot_data["settings"]
+    event = update.chat_member
+    if not event or not _is_supported_membership_chat(event.chat):
+        return
+
+    chat = await db.touch_managed_chat_from_event(
+        chat_id=event.chat.id,
+        title=event.chat.title,
+        username=event.chat.username,
+    )
+    if int(chat["is_active"]) != 1:
+        return
+
+    member_user = event.new_chat_member.user
+    if member_user.is_bot:
+        return
+
+    user_id = int(member_user.id)
+    await db.upsert_user(
+        user_id=user_id,
+        full_name=_member_full_name(event),
+        username=member_user.username,
+    )
+
+    was_member = _is_active_chat_member(event.old_chat_member)
+    is_member = _is_active_chat_member(event.new_chat_member)
+    await db.set_user_channel_membership(user_id=user_id, chat_id=event.chat.id, is_member=is_member)
+
+    if not (is_member and not was_member):
+        return
+
+    if await db.has_active_subscription(user_id=user_id, now_iso=utcnow().isoformat()):
+        return
+
+    removed, failed = await ban_user_from_chats(
+        bot=context.bot,
+        chat_ids=[event.chat.id],
+        user_id=user_id,
+    )
+    await db.set_user_channel_membership(user_id=user_id, chat_id=event.chat.id, is_member=False)
+    await db.log_dialog(
+        user_id,
+        "system",
+        (
+            "chat_join_blocked:no_active_subscription;"
+            f"chat_id={event.chat.id};removed={','.join(str(chat_id) for chat_id in removed) if removed else '-'};"
+            f"failed={';'.join(f'{chat_id}:{error}' for chat_id, error in failed.items()) if failed else '-'}"
+        )[:4000],
+    )
+
+    if failed:
+        try:
+            await context.bot.send_message(
+                chat_id=settings.admin_telegram_id,
+                text=(
+                    "Membership enforcement error.\n"
+                    f"User ID: {user_id}\n"
+                    f"Chat ID: {event.chat.id}\n"
+                    f"Errors: {_format_chat_errors(failed)}"
+                )[:4000],
+            )
+        except Exception as notify_exc:
+            await db.log_dialog(
+                user_id,
+                "system",
+                f"membership_enforcement_admin_notify_failed:user_id={user_id};error={notify_exc}"[:4000],
+            )
+
+
 def _format_chat_op_log(prefix: str, removed: list[int], failed: dict[int, str]) -> str:
     removed_part = ",".join(str(chat_id) for chat_id in removed) if removed else "-"
     failed_part = ";".join(f"{chat_id}:{error}" for chat_id, error in failed.items()) if failed else "-"
@@ -359,11 +468,15 @@ async def process_expired_subscriptions(app: Application) -> None:
     expired = await db.list_expired_subscriptions(now_iso=utcnow().isoformat(), limit=200)
     for user in expired:
         user_id = int(user["user_id"])
+        user_chat_ids = await db.list_user_channel_chat_ids(user_id=user_id, only_active=True)
+        target_chat_ids = user_chat_ids or managed_chat_ids
         removed, failed = await ban_user_from_chats(
             bot=app.bot,
-            chat_ids=managed_chat_ids,
+            chat_ids=target_chat_ids,
             user_id=user_id,
         )
+        if removed:
+            await db.set_user_channel_memberships(user_id=user_id, chat_ids=removed, is_member=False)
         await db.deactivate_subscription(user_id)
         await db.log_dialog(
             user_id,
@@ -419,6 +532,8 @@ def build_bot_application(settings: Settings, db: Database) -> Application:
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("subscribe", subscribe_handler))
     app.add_handler(CommandHandler("info", info_handler))
+    app.add_handler(ChatMemberHandler(my_chat_member_handler, ChatMemberHandler.MY_CHAT_MEMBER))
+    app.add_handler(ChatMemberHandler(chat_member_handler, ChatMemberHandler.CHAT_MEMBER))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, receipt_handler))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), text_handler))

@@ -274,6 +274,14 @@
             <button id="goPayments">Open payments</button>
           </div>
           <p class="muted" style="margin-top: 12px;">This page shows only pending payments. Full list and filters are available in the "Payments" section.</p>
+          <h3 style="margin-top: 16px;">Premium Folder Link</h3>
+          <p class="mono" id="premiumFolderLink">-</p>
+          <div class="toolbar">
+            <input id="premiumFolderLinkInput" type="text" placeholder="https://t.me/..." />
+            <button id="savePremiumLinkBtn">Save link</button>
+            <a id="premiumFolderLinkOpen" href="#" target="_blank" rel="noopener">Open link</a>
+            <button id="copyPremiumLinkBtn" class="secondary">Copy link</button>
+          </div>
         </div>
       </div>
     </section>
@@ -437,6 +445,7 @@
       pendingPayments: [],
       managedChats: [],
       stats: {},
+      premiumFolderLink: "",
       usersSearch: "",
       usersStatus: "all",
       paymentsSearch: "",
@@ -540,6 +549,42 @@
           loadPaymentDetail();
         });
       });
+    }
+
+    function renderPremiumFolderLink() {
+      const value = state.premiumFolderLink || "-";
+      const linkText = document.getElementById("premiumFolderLink");
+      const openLink = document.getElementById("premiumFolderLinkOpen");
+      const input = document.getElementById("premiumFolderLinkInput");
+      linkText.textContent = value;
+      input.value = state.premiumFolderLink || "";
+      if (!state.premiumFolderLink) {
+        openLink.setAttribute("href", "#");
+        openLink.classList.add("hidden");
+        return;
+      }
+      openLink.setAttribute("href", state.premiumFolderLink);
+      openLink.classList.remove("hidden");
+    }
+
+    async function savePremiumFolderLink() {
+      const input = document.getElementById("premiumFolderLinkInput");
+      const value = input.value.trim();
+      if (!value) {
+        setStatus("Premium link must not be empty");
+        return;
+      }
+      try {
+        const response = await api("/api/settings/premium-folder-link", {
+          method: "PATCH",
+          body: JSON.stringify({ value }),
+        });
+        state.premiumFolderLink = response.premium_folder_link || value;
+        renderPremiumFolderLink();
+        setStatus("Premium link saved");
+      } catch (err) {
+        setStatus(`Failed to save premium link: ${err.message}`);
+      }
     }
 
     function renderManagedChats() {
@@ -974,11 +1019,13 @@
         state.stats = overview.stats || {};
         state.users = overview.users || [];
         state.pendingPayments = overview.pending_payments || [];
+        state.premiumFolderLink = overview.premium_folder_link || "";
         state.payments = payments || [];
         state.managedChats = managedChats || [];
 
         renderStats();
         renderPendingHome();
+        renderPremiumFolderLink();
         renderManagedChats();
         renderUsers();
         renderPayments();
@@ -1005,6 +1052,19 @@
     document.getElementById("goChannels").addEventListener("click", () => switchTab("channels"));
     document.getElementById("goUsers").addEventListener("click", () => switchTab("users"));
     document.getElementById("goPayments").addEventListener("click", () => switchTab("payments"));
+    document.getElementById("savePremiumLinkBtn").addEventListener("click", savePremiumFolderLink);
+    document.getElementById("copyPremiumLinkBtn").addEventListener("click", async () => {
+      if (!state.premiumFolderLink) {
+        setStatus("Premium link is empty");
+        return;
+      }
+      try {
+        await navigator.clipboard.writeText(state.premiumFolderLink);
+        setStatus("Premium link copied");
+      } catch (err) {
+        setStatus(`Failed to copy premium link: ${err.message}`);
+      }
+    });
     document.getElementById("addChannelBtn").addEventListener("click", addManagedChat);
 
     document.getElementById("refreshBtn").addEventListener("click", () => loadData());

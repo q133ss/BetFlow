@@ -21,7 +21,6 @@ class Settings:
     admin_web_username: str
     admin_web_password: str
     admin_session_secret: str
-    premium_folder_link: str
     db_path: str
     api_host: str
     api_port: int
@@ -72,7 +71,6 @@ class Settings:
             admin_web_username=admin_username,
             admin_web_password=admin_password,
             admin_session_secret=admin_session_secret,
-            premium_folder_link=_getenv_clean("PREMIUM_FOLDER_LINK", "https://t.me/+replace_me"),
             db_path=_getenv_clean("DB_PATH", "./botchain.db"),
             api_host=_getenv_clean("API_HOST", "0.0.0.0"),
             api_port=int(_getenv_clean("API_PORT", "8080")),

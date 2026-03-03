@@ -47,6 +47,10 @@ class ManagedChatStatusPayload(BaseModel):
     is_active: bool
 
 
+class PremiumFolderLinkPayload(BaseModel):
+    value: str
+
+
 def _is_authenticated(request: Request) -> bool:
     return bool(request.session.get("is_admin"))
 
@@ -129,7 +133,19 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
             "stats": await db.stats(),
             "pending_payments": await db.list_payments(limit=50, status="pending"),
             "users": await db.list_users(limit=200),
+            "premium_folder_link": await db.get_premium_folder_link(),
         }
+
+    @app.patch("/api/settings/premium-folder-link")
+    async def update_premium_folder_link(
+        payload: PremiumFolderLinkPayload,
+        _: dict[str, Any] = Depends(require_admin),
+    ) -> dict[str, Any]:
+        link = payload.value.strip()
+        if not link:
+            raise HTTPException(status_code=400, detail="Link must not be empty")
+        await db.set_premium_folder_link(link)
+        return {"ok": True, "premium_folder_link": link}
 
     @app.get("/api/managed-chats")
     async def managed_chats(
@@ -201,6 +217,8 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
                 chat_ids=managed_chat_ids,
                 user_id=user_id,
             )
+            if removed:
+                await db.set_user_channel_memberships(user_id=user_id, chat_ids=removed, is_member=False)
 
         message = texts.CANCELED_BY_ADMIN_TEMPLATE.format(reason=reason)
         try:
@@ -231,11 +249,9 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
         admin: dict[str, Any] = Depends(require_admin),
     ) -> dict[str, Any]:
         existing_user = await db.get_user(user_id)
-        has_history = await db.user_has_subscription_history(user_id)
         should_unban = bool(
             existing_user
             and existing_user.get("subscription_status") != "subscribed"
-            and has_history
         )
 
         reason = (payload.reason or "Assigned by admin").strip()
@@ -253,7 +269,11 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
                 user_id=user_id,
             )
 
-        message = texts.ASSIGNED_BY_ADMIN_TEMPLATE.format(days=payload.days, premium_link=settings.premium_folder_link)
+        premium_folder_link = await db.get_premium_folder_link()
+        message = texts.ASSIGNED_BY_ADMIN_TEMPLATE.format(
+            days=payload.days,
+            premium_link=premium_folder_link,
+        )
         try:
             await bot.send_message(chat_id=user_id, text=message, disable_web_page_preview=False)
             await db.log_dialog(user_id, "out", message)
@@ -332,11 +352,9 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
             raise HTTPException(status_code=404, detail="Payment not found")
         user_id = int(payment_before["user_id"])
         existing_user = await db.get_user(user_id)
-        has_history = await db.user_has_subscription_history(user_id)
         should_unban = bool(
             existing_user
             and existing_user.get("subscription_status") != "subscribed"
-            and has_history
         )
 
         reviewed = await db.approve_payment(payment_id, reviewed_by=int(admin["id"]))
@@ -366,7 +384,8 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
                 f"subscription_reactivated_unban:unban_attempted={'1' if should_unban else '0'};unbanned=-;failed=-",
             )
 
-        message = texts.APPROVED_TEMPLATE.format(premium_link=settings.premium_folder_link)
+        premium_folder_link = await db.get_premium_folder_link()
+        message = texts.APPROVED_TEMPLATE.format(premium_link=premium_folder_link)
         await bot.send_message(
             chat_id=user_id,
             text=message,

@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 
 from dotenv import load_dotenv
+from telegram import Update
 import uvicorn
 
 from .bot import build_bot_application, subscription_expiry_loop
@@ -45,8 +46,15 @@ async def run() -> None:
                 bot_initialized = True
                 await telegram_app.start()
                 bot_started = True
-                await telegram_app.updater.start_polling()
+                await telegram_app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
                 bot_polling = True
+                try:
+                    await telegram_app.bot.send_message(
+                        chat_id=settings.admin_telegram_id,
+                        text="Bot is online.",
+                    )
+                except Exception as exc:
+                    print(f"WARNING: failed to send startup admin message: {exc}")
                 expiry_task = asyncio.create_task(subscription_expiry_loop(telegram_app))
             except Exception as exc:
                 print(f"WARNING: Telegram bot failed to start, admin web is still available: {exc}")
