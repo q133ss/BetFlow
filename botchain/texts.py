@@ -47,7 +47,22 @@ Your access has been extended by {days} day(s).
 Premium link:
 {premium_link}"""
 
-SUBSCRIPTION_EXPIRED_TEMPLATE = """Your subscription has expired.
-Access to premium channels has been revoked.
+SUBSCRIPTION_EXPIRING_TEMPLATE = """Напоминание: подписка закончится через {days} дн.
+Продлите ее заранее, чтобы не потерять доступ.
 
-Send /subscribe to renew access."""
+Отправьте /subscribe для продления."""
+
+SUBSCRIPTION_EXPIRED_TEMPLATE = """Ваша подписка закончилась.
+Доступ к премиум-каналам отключен.
+
+Отправьте /subscribe для продления доступа."""
+
+ADMIN_SUBSCRIPTION_EXPIRED_TEMPLATE = """Авто-истечение обработано.
+
+Пользователь: {full_name}
+Username: {username}
+User ID: {user_id}
+Подписка истекла: {subscription_end_at}
+
+Авто-исключен из чатов: {removed}
+Ошибки исключения: {failed}"""

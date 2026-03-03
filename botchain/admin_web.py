@@ -36,6 +36,17 @@ class AssignSubscriptionPayload(BaseModel):
     reason: str | None = None
 
 
+class ManagedChatPayload(BaseModel):
+    chat_id: int
+    title: str | None = None
+    username: str | None = None
+    is_active: bool = True
+
+
+class ManagedChatStatusPayload(BaseModel):
+    is_active: bool
+
+
 def _is_authenticated(request: Request) -> bool:
     return bool(request.session.get("is_admin"))
 
@@ -120,6 +131,44 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
             "users": await db.list_users(limit=200),
         }
 
+    @app.get("/api/managed-chats")
+    async def managed_chats(
+        only_active: bool = Query(default=False),
+        _: dict[str, Any] = Depends(require_admin),
+    ) -> list[dict[str, Any]]:
+        return await db.list_managed_chats(only_active=only_active)
+
+    @app.post("/api/managed-chats")
+    async def managed_chats_add(
+        payload: ManagedChatPayload,
+        _: dict[str, Any] = Depends(require_admin),
+    ) -> dict[str, Any]:
+        chat = await db.add_managed_chat(
+            chat_id=payload.chat_id,
+            title=payload.title,
+            username=payload.username,
+            is_active=payload.is_active,
+        )
+        return {"ok": True, "chat": chat}
+
+    @app.patch("/api/managed-chats/{chat_id}")
+    async def managed_chats_patch(
+        chat_id: int,
+        payload: ManagedChatStatusPayload,
+        _: dict[str, Any] = Depends(require_admin),
+    ) -> dict[str, Any]:
+        chat = await db.set_managed_chat_active(chat_id=chat_id, is_active=payload.is_active)
+        if not chat:
+            raise HTTPException(status_code=404, detail="Managed chat not found")
+        return {"ok": True, "chat": chat}
+
+    @app.delete("/api/managed-chats/{chat_id}")
+    async def managed_chats_delete(chat_id: int, _: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
+        deleted = await db.remove_managed_chat(chat_id=chat_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Managed chat not found")
+        return {"ok": True, "chat_id": chat_id}
+
     @app.get("/api/users")
     async def users(_: dict[str, Any] = Depends(require_admin)) -> list[dict[str, Any]]:
         return await db.list_users(limit=1000)
@@ -145,10 +194,11 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
 
         removed: list[int] = []
         failed: dict[int, str] = {}
-        if settings.managed_chat_ids:
+        managed_chat_ids = await db.list_managed_chat_ids(only_active=True)
+        if managed_chat_ids:
             removed, failed = await ban_user_from_chats(
                 bot=bot,
-                chat_ids=settings.managed_chat_ids,
+                chat_ids=managed_chat_ids,
                 user_id=user_id,
             )
 
@@ -180,6 +230,14 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
         payload: AssignSubscriptionPayload,
         admin: dict[str, Any] = Depends(require_admin),
     ) -> dict[str, Any]:
+        existing_user = await db.get_user(user_id)
+        has_history = await db.user_has_subscription_history(user_id)
+        should_unban = bool(
+            existing_user
+            and existing_user.get("subscription_status") != "subscribed"
+            and has_history
+        )
+
         reason = (payload.reason or "Assigned by admin").strip()
         user = await db.assign_subscription_by_admin(user_id=user_id, days=payload.days)
         if not user:
@@ -187,10 +245,11 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
 
         unbanned: list[int] = []
         failed_unban: dict[int, str] = {}
-        if settings.managed_chat_ids:
+        managed_chat_ids = await db.list_managed_chat_ids(only_active=True)
+        if managed_chat_ids and should_unban:
             unbanned, failed_unban = await unban_user_in_chats(
                 bot=bot,
-                chat_ids=settings.managed_chat_ids,
+                chat_ids=managed_chat_ids,
                 user_id=user_id,
             )
 
@@ -210,13 +269,20 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
             "system",
             (
                 f"subscription_assigned_by_admin:admin_id={admin['id']};days={payload.days};reason={reason};"
+                f"unban_attempted={'1' if should_unban else '0'};"
                 f"subscription_end_at={user.get('subscription_end_at') or '-'};"
                 f"unbanned={','.join(str(chat_id) for chat_id in unbanned) if unbanned else '-'};"
                 f"failed={';'.join(f'{chat_id}:{error}' for chat_id, error in failed_unban.items()) if failed_unban else '-'}"
             )[:4000],
         )
 
-        return {"ok": True, "user": user, "unbanned_chats": unbanned, "failed_unban": failed_unban}
+        return {
+            "ok": True,
+            "user": user,
+            "unban_attempted": should_unban,
+            "unbanned_chats": unbanned,
+            "failed_unban": failed_unban,
+        }
 
     @app.get("/api/payments")
     async def payments(
@@ -261,24 +327,43 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
 
     @app.post("/api/payments/{payment_id}/approve")
     async def approve(payment_id: int, admin: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
+        payment_before = await db.get_payment(payment_id)
+        if not payment_before:
+            raise HTTPException(status_code=404, detail="Payment not found")
+        user_id = int(payment_before["user_id"])
+        existing_user = await db.get_user(user_id)
+        has_history = await db.user_has_subscription_history(user_id)
+        should_unban = bool(
+            existing_user
+            and existing_user.get("subscription_status") != "subscribed"
+            and has_history
+        )
+
         reviewed = await db.approve_payment(payment_id, reviewed_by=int(admin["id"]))
         if not reviewed:
             raise HTTPException(status_code=400, detail="Payment already processed or missing")
 
-        user_id = int(reviewed["user_id"])
-        if settings.managed_chat_ids:
+        managed_chat_ids = await db.list_managed_chat_ids(only_active=True)
+        if managed_chat_ids and should_unban:
             unbanned, failed_unban = await unban_user_in_chats(
                 bot=bot,
-                chat_ids=settings.managed_chat_ids,
+                chat_ids=managed_chat_ids,
                 user_id=user_id,
             )
             await db.log_dialog(
                 user_id,
                 "system",
                 (
-                    f"subscription_reactivated_unban:unbanned={','.join(str(chat_id) for chat_id in unbanned) if unbanned else '-'};"
+                    f"subscription_reactivated_unban:unban_attempted={'1' if should_unban else '0'};"
+                    f"unbanned={','.join(str(chat_id) for chat_id in unbanned) if unbanned else '-'};"
                     f"failed={';'.join(f'{chat_id}:{error}' for chat_id, error in failed_unban.items()) if failed_unban else '-'}"
                 )[:4000],
+            )
+        else:
+            await db.log_dialog(
+                user_id,
+                "system",
+                f"subscription_reactivated_unban:unban_attempted={'1' if should_unban else '0'};unbanned=-;failed=-",
             )
 
         message = texts.APPROVED_TEMPLATE.format(premium_link=settings.premium_folder_link)
@@ -289,7 +374,7 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
         )
         await db.log_dialog(user_id, "out", message)
 
-        return {"ok": True, "payment": reviewed}
+        return {"ok": True, "payment": reviewed, "unban_attempted": should_unban}
 
     @app.post("/api/payments/{payment_id}/reject")
     async def reject(

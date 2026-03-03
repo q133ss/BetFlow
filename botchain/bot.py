@@ -1,7 +1,7 @@
 ﻿from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -303,19 +303,65 @@ def _format_chat_op_log(prefix: str, removed: list[int], failed: dict[int, str])
     return f"{prefix};removed={removed_part};failed={failed_part}"[:4000]
 
 
+def _format_username(username: str | None) -> str:
+    return f"@{username}" if username else "-"
+
+
+def _format_chat_ids(chat_ids: list[int]) -> str:
+    return ",".join(str(chat_id) for chat_id in chat_ids) if chat_ids else "-"
+
+
+def _format_chat_errors(failed: dict[int, str]) -> str:
+    if not failed:
+        return "-"
+    return "; ".join(f"{chat_id}:{error}" for chat_id, error in failed.items())
+
+
+async def process_subscription_expiry_reminders(app: Application) -> None:
+    db: Database = app.bot_data["db"]
+    now = utcnow()
+
+    for days_before_end in (3, 2, 1):
+        min_end_iso = (now + timedelta(days=days_before_end - 1)).isoformat()
+        max_end_iso = (now + timedelta(days=days_before_end)).isoformat()
+        candidates = await db.list_subscription_reminder_candidates(
+            min_end_iso=min_end_iso,
+            max_end_iso=max_end_iso,
+            days_before_end=days_before_end,
+            limit=200,
+        )
+        for user in candidates:
+            user_id = int(user["user_id"])
+            text = texts.SUBSCRIPTION_EXPIRING_TEMPLATE.format(days=days_before_end)
+            try:
+                await app.bot.send_message(chat_id=user_id, text=text)
+                await db.log_dialog(user_id, "out", text)
+                await db.mark_subscription_reminder_sent(
+                    user_id=user_id,
+                    days_before_end=days_before_end,
+                )
+            except Exception as exc:
+                await db.log_dialog(
+                    user_id,
+                    "system",
+                    (
+                        "subscription_expiry_reminder_failed:"
+                        f"user_id={user_id};days={days_before_end};error={exc}"
+                    )[:4000],
+                )
+
+
 async def process_expired_subscriptions(app: Application) -> None:
     db: Database = app.bot_data["db"]
     settings: Settings = app.bot_data["settings"]
-
-    if not settings.managed_chat_ids:
-        return
+    managed_chat_ids = await db.list_managed_chat_ids(only_active=True)
 
     expired = await db.list_expired_subscriptions(now_iso=utcnow().isoformat(), limit=200)
     for user in expired:
         user_id = int(user["user_id"])
         removed, failed = await ban_user_from_chats(
             bot=app.bot,
-            chat_ids=settings.managed_chat_ids,
+            chat_ids=managed_chat_ids,
             user_id=user_id,
         )
         await db.deactivate_subscription(user_id)
@@ -335,11 +381,29 @@ async def process_expired_subscriptions(app: Application) -> None:
                 f"subscription_expired_notify_failed:user_id={user_id};error={exc}"[:4000],
             )
 
+        admin_text = texts.ADMIN_SUBSCRIPTION_EXPIRED_TEMPLATE.format(
+            full_name=user.get("full_name") or "-",
+            username=_format_username(user.get("username")),
+            user_id=user_id,
+            subscription_end_at=user.get("subscription_end_at") or "-",
+            removed=_format_chat_ids(removed),
+            failed=_format_chat_errors(failed),
+        )
+        try:
+            await app.bot.send_message(chat_id=settings.admin_telegram_id, text=admin_text[:4000])
+        except Exception as exc:
+            await db.log_dialog(
+                user_id,
+                "system",
+                f"admin_expiry_notify_failed:user_id={user_id};error={exc}"[:4000],
+            )
+
 
 async def subscription_expiry_loop(app: Application) -> None:
     settings: Settings = app.bot_data["settings"]
     while True:
         try:
+            await process_subscription_expiry_reminders(app)
             await process_expired_subscriptions(app)
         except Exception as exc:
             print(f"ERROR: subscription expiry sweep failed: {exc}")

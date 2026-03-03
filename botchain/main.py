@@ -18,6 +18,9 @@ async def run() -> None:
 
     db = Database(settings.db_path)
     await db.init()
+    seeded_chats = await db.seed_managed_chats(settings.managed_chat_ids)
+    if seeded_chats:
+        print(f"INFO: seeded {seeded_chats} managed chats from MANAGED_CHAT_IDS")
 
     telegram_app = build_bot_application(settings=settings, db=db)
     api_app = create_fastapi_app(settings=settings, db=db, bot=telegram_app.bot)

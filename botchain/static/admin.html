@@ -6,15 +6,17 @@
   <title>BotChain Admin</title>
   <style>
     :root {
-      --bg: #f7f4ef;
-      --card: #ffffff;
-      --accent: #264653;
-      --accent-2: #2a9d8f;
-      --danger: #c1121f;
-      --text: #1b1f24;
-      --muted: #6b7280;
-      --line: #e8e3da;
-      --tab-bg: #eef3f1;
+      --bg: #0b1220;
+      --card: #131d33;
+      --surface: #0f172a;
+      --surface-2: #0c1426;
+      --accent: #5bc0be;
+      --accent-2: #2ec4b6;
+      --danger: #ef4444;
+      --text: #e5edf8;
+      --muted: #93a3c4;
+      --line: #24324d;
+      --tab-bg: #1a2740;
     }
 
     * { box-sizing: border-box; }
@@ -23,7 +25,8 @@
       margin: 0;
       font-family: "Segoe UI", Tahoma, sans-serif;
       color: var(--text);
-      background: radial-gradient(circle at 10% 10%, #fff8ec 0%, #f7f4ef 45%, #ede8df 100%);
+      background-color: var(--bg);
+      background: radial-gradient(circle at 10% 10%, #1b2a49 0%, #0f172a 45%, #0a1020 100%);
       min-height: 100vh;
     }
 
@@ -40,7 +43,7 @@
       border: 1px solid var(--line);
       border-radius: 14px;
       padding: 14px;
-      box-shadow: 0 8px 24px rgba(38, 70, 83, 0.08);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
     }
 
     h1, h2, h3 { margin: 0 0 10px 0; }
@@ -115,9 +118,9 @@
     .muted { color: var(--muted); }
     .mono { font-family: Consolas, monospace; font-size: 12px; }
 
-    .status-pending { color: #b45309; font-weight: 700; }
-    .status-approved { color: #166534; font-weight: 700; }
-    .status-rejected { color: #b91c1c; font-weight: 700; }
+    .status-approved { color: #22c55e; font-weight: 700; }
+    .status-rejected { color: #f87171; font-weight: 700; }
+    .status-pending { color: #f59e0b; font-weight: 700; }
 
     table {
       width: 100%;
@@ -138,7 +141,7 @@
       overflow: auto;
       border: 1px solid var(--line);
       border-radius: 10px;
-      background: #fff;
+      background: var(--surface);
     }
 
     .stats {
@@ -151,7 +154,7 @@
       border: 1px solid var(--line);
       border-radius: 10px;
       padding: 10px;
-      background: #fff;
+      background: var(--surface);
     }
 
     .stat-item .label { color: var(--muted); font-size: 13px; }
@@ -161,8 +164,12 @@
       border: 1px solid var(--line);
       border-radius: 10px;
       padding: 8px 10px;
-      background: #fff;
+      background: var(--surface);
       color: var(--text);
+    }
+
+    input::placeholder {
+      color: var(--muted);
     }
 
     input[type="text"] {
@@ -175,7 +182,7 @@
       border: 1px solid var(--line);
       border-radius: 10px;
       padding: 8px;
-      background: #fff;
+      background: var(--surface);
     }
 
     .msg {
@@ -198,8 +205,12 @@
       object-fit: contain;
       border: 1px solid var(--line);
       border-radius: 10px;
-      background: #f8f8f8;
+      background: var(--surface-2);
       margin-top: 8px;
+    }
+
+    a {
+      color: #93c5fd;
     }
 
     .hidden { display: none; }
@@ -225,6 +236,7 @@
       <p class="muted" id="statusLine">Loading...</p>
       <div class="tabs" id="tabs">
         <button class="tab-btn active" data-tab="home">Home</button>
+        <button class="tab-btn" data-tab="channels">Channels</button>
         <button class="tab-btn" data-tab="users">Users</button>
         <button class="tab-btn" data-tab="payments">Payments</button>
       </div>
@@ -257,10 +269,53 @@
         <div class="card">
           <h2>Quick Actions</h2>
           <div class="toolbar">
+            <button id="goChannels">Open channels</button>
             <button id="goUsers" class="secondary">Open users</button>
             <button id="goPayments">Open payments</button>
           </div>
           <p class="muted" style="margin-top: 12px;">This page shows only pending payments. Full list and filters are available in the "Payments" section.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="section-channels" class="section">
+      <div class="grid-wide">
+        <div class="card">
+          <div class="row space-between">
+            <h2>Managed Channels</h2>
+            <span class="muted" id="channelsCount"></span>
+          </div>
+          <div class="toolbar" style="margin-bottom: 10px;">
+            <input id="channelChatId" type="text" placeholder="Chat ID, e.g. -1001234567890" />
+            <input id="channelTitle" type="text" placeholder="Optional title" />
+            <input id="channelUsername" type="text" placeholder="Optional username" />
+            <button id="addChannelBtn">Add / Update</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Chat ID</th>
+                  <th>Title</th>
+                  <th>Username</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="channelsBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>How It Works</h2>
+          <p class="muted">
+            Active channels are used for membership actions (ban/unban) after approve/cancel and in automatic
+            subscription expiry sweeps.
+          </p>
+          <p class="muted">
+            You can disable a channel without deleting it, then enable it later.
+          </p>
         </div>
       </div>
     </section>
@@ -380,6 +435,7 @@
       users: [],
       payments: [],
       pendingPayments: [],
+      managedChats: [],
       stats: {},
       usersSearch: "",
       usersStatus: "all",
@@ -484,6 +540,105 @@
           loadPaymentDetail();
         });
       });
+    }
+
+    function renderManagedChats() {
+      const chats = state.managedChats || [];
+      document.getElementById("channelsCount").textContent = `Total: ${chats.length}`;
+      const body = document.getElementById("channelsBody");
+      body.innerHTML = "";
+
+      if (!chats.length) {
+        body.innerHTML = `<tr><td colspan="5" class="muted">No channels configured.</td></tr>`;
+        return;
+      }
+
+      chats.forEach((chat) => {
+        const isActive = Number(chat.is_active) === 1;
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td class="mono">${escapeHtml(chat.chat_id)}</td>
+          <td>${escapeHtml(chat.title || "-")}</td>
+          <td>${escapeHtml(formatUsername(chat.username))}</td>
+          <td>${isActive ? "active" : "inactive"}</td>
+          <td>
+            <button data-channel-toggle="${chat.chat_id}" data-channel-active="${isActive ? "1" : "0"}" class="secondary">
+              ${isActive ? "Disable" : "Enable"}
+            </button>
+            <button data-channel-delete="${chat.chat_id}" class="danger">Delete</button>
+          </td>
+        `;
+        body.appendChild(row);
+      });
+
+      body.querySelectorAll("button[data-channel-toggle]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const chatId = Number(btn.dataset.channelToggle);
+          const current = btn.dataset.channelActive === "1";
+          try {
+            await api(`/api/managed-chats/${chatId}`, {
+              method: "PATCH",
+              body: JSON.stringify({ is_active: !current }),
+            });
+            setStatus(`Channel ${chatId} ${current ? "disabled" : "enabled"}`);
+            await loadData();
+          } catch (err) {
+            setStatus(`Channel toggle error: ${err.message}`);
+          }
+        });
+      });
+
+      body.querySelectorAll("button[data-channel-delete]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const chatId = Number(btn.dataset.channelDelete);
+          if (!confirm(`Delete channel ${chatId}?`)) {
+            return;
+          }
+          try {
+            await api(`/api/managed-chats/${chatId}`, { method: "DELETE" });
+            setStatus(`Channel ${chatId} deleted`);
+            await loadData();
+          } catch (err) {
+            setStatus(`Channel delete error: ${err.message}`);
+          }
+        });
+      });
+    }
+
+    async function addManagedChat() {
+      const chatIdRaw = document.getElementById("channelChatId").value.trim();
+      if (!chatIdRaw) {
+        alert("Enter chat id");
+        return;
+      }
+
+      const chatId = Number(chatIdRaw);
+      if (!Number.isInteger(chatId)) {
+        alert("Chat ID must be an integer");
+        return;
+      }
+
+      const title = document.getElementById("channelTitle").value.trim();
+      const username = document.getElementById("channelUsername").value.trim();
+
+      try {
+        await api("/api/managed-chats", {
+          method: "POST",
+          body: JSON.stringify({
+            chat_id: chatId,
+            title: title || null,
+            username: username || null,
+            is_active: true,
+          }),
+        });
+        document.getElementById("channelChatId").value = "";
+        document.getElementById("channelTitle").value = "";
+        document.getElementById("channelUsername").value = "";
+        setStatus(`Channel ${chatId} saved`);
+        await loadData();
+      } catch (err) {
+        setStatus(`Channel save error: ${err.message}`);
+      }
     }
 
     function getFilteredUsers() {
@@ -810,18 +965,21 @@
     async function loadData() {
       try {
         setStatus("Loading data...");
-        const [overview, payments] = await Promise.all([
+        const [overview, payments, managedChats] = await Promise.all([
           api("/api/overview"),
           api("/api/payments"),
+          api("/api/managed-chats"),
         ]);
 
         state.stats = overview.stats || {};
         state.users = overview.users || [];
         state.pendingPayments = overview.pending_payments || [];
         state.payments = payments || [];
+        state.managedChats = managedChats || [];
 
         renderStats();
         renderPendingHome();
+        renderManagedChats();
         renderUsers();
         renderPayments();
 
@@ -844,8 +1002,10 @@
       switchTab(btn.dataset.tab);
     });
 
+    document.getElementById("goChannels").addEventListener("click", () => switchTab("channels"));
     document.getElementById("goUsers").addEventListener("click", () => switchTab("users"));
     document.getElementById("goPayments").addEventListener("click", () => switchTab("payments"));
+    document.getElementById("addChannelBtn").addEventListener("click", addManagedChat);
 
     document.getElementById("refreshBtn").addEventListener("click", () => loadData());
     document.getElementById("logoutBtn").addEventListener("click", logout);
