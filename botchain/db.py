@@ -175,6 +175,22 @@ class Database:
             rows = await cur.fetchall()
         return [dict(row) for row in rows]
 
+    async def list_user_payments(self, user_id: int, limit: int = 200) -> list[dict[str, Any]]:
+        assert self._db is not None
+        async with self._db.execute(
+            """
+            SELECT p.*, u.full_name, u.username
+            FROM payments p
+            JOIN users u ON u.user_id = p.user_id
+            WHERE p.user_id = ?
+            ORDER BY p.created_at DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(row) for row in rows]
+
     async def approve_payment(self, payment_id: int, reviewed_by: int, days: int = 30) -> dict[str, Any] | None:
         assert self._db is not None
         now = utcnow()

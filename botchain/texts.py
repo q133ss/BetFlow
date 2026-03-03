@@ -1,50 +1,37 @@
-﻿START_TEMPLATE = """Welcome to BotChain Reseller Service!
-The best Tipsters network in the world.
+﻿START_TEMPLATE = """Welcome to BotChain!
 
-Save hundreds of euros, instead paying for each service separately access them all with a single subscription with above 40 VIP Channels.
-
-To gain access, follow these steps:
+To get access, follow these 3 steps:
 1. Send /subscribe
-2. Send screenshot of payment
-3. Wait for verification, and you will be added automatically. ⏳
+2. Send a payment receipt screenshot or file
+3. Wait for payment verification by the admin
 
-User: {first_name}
+User: {first_name}"""
 
-To get started, click on /subscribe"""
+SUBSCRIBE_TEXT = """Great, let's start your subscription.
 
-SUBSCRIBE_TEXT = """Thanks for subscribing!
+You have 5 hours to send your receipt. ⏳
 
-You have 5 hours to send the receipt. ⏳
+Price: 200€ for 30 days.
 
-Price: 200€ for a 30-day subscription
-For price inquiries, contact: @ChainBoss19
-
--
-
-Payment Methods:
-
-TRC20 USDT:
+Payment method:
+TRC20 USDT
 TMPiXpboFH3YCrJKSVUDjkWyaKe6WcdAXy
 
--
+After payment, send your receipt screenshot or file in this chat.
+After payment verification, you will receive your subscription."""
 
-Once you've made the payment, send your receipt for verification.
-Once verified, you'll get full access to our premium Channels.
+RECEIPT_ACCEPTED_TEXT = """Receipt received.
 
-For any questions, feel free to reach out to us: @ChainBoss19
+After payment verification, you will receive your subscription.
+We will notify you as soon as the admin makes a decision. ⏳"""
 
-Welcome to BotChain!"""
-
-RECEIPT_ACCEPTED_TEXT = """Receipt received. Your payment is now pending verification.
-We'll notify you as soon as the admin reviews it. ⏳"""
-
-APPROVED_TEMPLATE = """Payment verified successfully. ✅
+APPROVED_TEMPLATE = """Payment approved. ✅
 Your 30-day subscription is now active.
 
-Premium access link:
+Premium link:
 {premium_link}"""
 
 REJECTED_TEMPLATE = """Payment was rejected. ❌
 Reason: {reason}
 
-Please send /subscribe and upload a new receipt."""
+Send /subscribe and upload a new receipt."""

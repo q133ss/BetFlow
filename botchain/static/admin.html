@@ -1,5 +1,5 @@
 ﻿<!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -14,6 +14,7 @@
       --text: #1b1f24;
       --muted: #6b7280;
       --line: #e8e3da;
+      --tab-bg: #eef3f1;
     }
 
     * { box-sizing: border-box; }
@@ -27,7 +28,7 @@
     }
 
     .wrap {
-      max-width: 1100px;
+      max-width: 1200px;
       margin: 0 auto;
       padding: 16px;
       display: grid;
@@ -44,17 +45,8 @@
 
     h1, h2, h3 { margin: 0 0 10px 0; }
     h1 { font-size: 22px; color: var(--accent); }
-    h2 { font-size: 17px; color: var(--accent); }
-
-    .grid {
-      display: grid;
-      gap: 14px;
-      grid-template-columns: 1.1fr 1fr;
-    }
-
-    @media (max-width: 860px) {
-      .grid { grid-template-columns: 1fr; }
-    }
+    h2 { font-size: 18px; color: var(--accent); }
+    h3 { font-size: 15px; color: var(--accent); }
 
     .row {
       display: flex;
@@ -62,6 +54,8 @@
       align-items: center;
       flex-wrap: wrap;
     }
+
+    .space-between { justify-content: space-between; }
 
     button {
       border: 0;
@@ -75,6 +69,55 @@
 
     button.secondary { background: var(--accent-2); }
     button.danger { background: var(--danger); }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .tab-btn {
+      background: var(--tab-bg);
+      color: var(--accent);
+      border: 1px solid var(--line);
+    }
+
+    .tab-btn.active {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    .section { display: none; }
+    .section.active { display: block; }
+
+    .grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .grid-wide {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: 1.1fr 1fr;
+    }
+
+    @media (max-width: 960px) {
+      .grid, .grid-wide { grid-template-columns: 1fr; }
+    }
+
+    .muted { color: var(--muted); }
+    .mono { font-family: Consolas, monospace; font-size: 12px; }
+
+    .status-pending { color: #b45309; font-weight: 700; }
+    .status-approved { color: #166534; font-weight: 700; }
+    .status-rejected { color: #b91c1c; font-weight: 700; }
 
     table {
       width: 100%;
@@ -91,14 +134,43 @@
 
     th { color: var(--muted); font-weight: 700; }
 
-    .muted { color: var(--muted); }
-    .mono { font-family: Consolas, monospace; font-size: 12px; }
-    .status-pending { color: #b45309; font-weight: 700; }
-    .status-approved { color: #166534; font-weight: 700; }
-    .status-rejected { color: #b91c1c; font-weight: 700; }
+    .table-wrap {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+    }
 
-    #dialogs {
-      max-height: 280px;
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 10px;
+    }
+
+    .stat-item {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #fff;
+    }
+
+    .stat-item .label { color: var(--muted); font-size: 13px; }
+    .stat-item .value { font-size: 22px; font-weight: 700; color: var(--accent); }
+
+    input, select {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: #fff;
+      color: var(--text);
+    }
+
+    input[type="text"] {
+      min-width: 230px;
+    }
+
+    .msg-list {
+      max-height: 320px;
       overflow: auto;
       border: 1px solid var(--line);
       border-radius: 10px;
@@ -106,87 +178,210 @@
       background: #fff;
     }
 
-    .msg { margin: 0 0 8px 0; }
+    .msg {
+      margin: 0 0 8px 0;
+      padding-bottom: 8px;
+      border-bottom: 1px dashed var(--line);
+    }
+
+    .msg:last-child {
+      border-bottom: 0;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+
     .msg .head { font-size: 12px; color: var(--muted); }
+
+    .receipt-preview {
+      width: 100%;
+      max-height: 460px;
+      object-fit: contain;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #f8f8f8;
+      margin-top: 8px;
+    }
+
+    .hidden { display: none; }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="card">
-      <div class="row" style="justify-content: space-between;">
+      <div class="row space-between">
         <h1>BotChain Admin Panel</h1>
         <div class="row">
-          <button class="secondary" id="refreshBtn">Обновить</button>
-          <button class="danger" id="logoutBtn">Выход</button>
+          <button class="secondary" id="refreshBtn">Refresh</button>
+          <button class="danger" id="logoutBtn">Logout</button>
         </div>
       </div>
-      <p class="muted" id="statusLine">Загрузка...</p>
-      <div class="row" id="stats"></div>
-    </div>
-
-    <div class="grid">
-      <div class="card">
-        <h2>Платежи</h2>
-        <div class="row">
-          <button id="showPending">Pending</button>
-          <button class="secondary" id="showAll">All</button>
-        </div>
-        <div style="overflow:auto; margin-top: 8px;">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>User</th>
-                <th>Status</th>
-                <th>Created</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody id="paymentsBody"></tbody>
-          </table>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>Детали платежа</h2>
-        <div id="paymentDetail" class="muted">Выберите платеж из списка.</div>
-        <div class="row" style="margin-top: 10px;">
-          <button class="secondary" id="approveBtn">Подтвердить оплату</button>
-          <button class="danger" id="rejectBtn">Отклонить</button>
-        </div>
+      <p class="muted" id="statusLine">Loading...</p>
+      <div class="tabs" id="tabs">
+        <button class="tab-btn active" data-tab="home">Home</button>
+        <button class="tab-btn" data-tab="users">Users</button>
+        <button class="tab-btn" data-tab="payments">Payments</button>
       </div>
     </div>
 
-    <div class="grid">
+    <section id="section-home" class="section active">
       <div class="card">
-        <h2>Пользователи</h2>
-        <div style="overflow:auto;">
-          <table>
-            <thead>
-              <tr>
-                <th>User ID</th>
-                <th>Name</th>
-                <th>Username</th>
-                <th>Status</th>
-                <th>Dialog</th>
-              </tr>
-            </thead>
-            <tbody id="usersBody"></tbody>
-          </table>
-        </div>
+        <h2>Overview</h2>
+        <div class="stats" id="stats"></div>
       </div>
 
-      <div class="card">
-        <h2>Диалог пользователя</h2>
-        <p class="muted" id="dialogUser">Не выбран</p>
-        <div id="dialogs"></div>
+      <div class="grid">
+        <div class="card">
+          <h2>Pending Review</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>User</th>
+                  <th>Date</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="pendingBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Quick Actions</h2>
+          <div class="toolbar">
+            <button id="goUsers" class="secondary">Open users</button>
+            <button id="goPayments">Open payments</button>
+          </div>
+          <p class="muted" style="margin-top: 12px;">This page shows only pending payments. Full list and filters are available in the "Payments" section.</p>
+        </div>
       </div>
-    </div>
+    </section>
+
+    <section id="section-users" class="section">
+      <div class="grid-wide">
+        <div class="card">
+          <div class="row space-between">
+            <h2>Users</h2>
+            <span class="muted" id="usersCount"></span>
+          </div>
+          <div class="toolbar" style="margin-bottom: 10px;">
+            <input id="usersSearch" type="text" placeholder="Search: id, name, username" />
+            <select id="usersStatusFilter">
+              <option value="all">All statuses</option>
+              <option value="subscribed">Subscribed</option>
+              <option value="not_subscribed">Not subscribed</option>
+            </select>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>User ID</th>
+                  <th>Name</th>
+                  <th>Username</th>
+                  <th>Status</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="usersBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>User Profile</h2>
+          <div id="userDetail" class="muted">Select a user from the list.</div>
+
+          <h3 style="margin-top: 16px;">Dialog</h3>
+          <div class="msg-list" id="dialogs"></div>
+
+          <h3 style="margin-top: 16px;">User Transactions</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Status</th>
+                  <th>Date</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="userPaymentsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="section-payments" class="section">
+      <div class="grid-wide">
+        <div class="card">
+          <div class="row space-between">
+            <h2>Payments</h2>
+            <span class="muted" id="paymentsCount"></span>
+          </div>
+          <div class="toolbar" style="margin-bottom: 10px;">
+            <select id="paymentsStatusFilter">
+              <option value="all">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="approved">Approved</option>
+              <option value="rejected">Rejected</option>
+            </select>
+            <input id="paymentsSearch" type="text" placeholder="Search: id, user id, name, username" />
+          </div>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>User</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="paymentsBody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Payment Details</h2>
+          <div id="paymentDetail" class="muted">Select a payment from the list.</div>
+          <div class="row" style="margin-top: 10px;">
+            <button class="secondary" id="approveBtn">Approve payment</button>
+            <button class="danger" id="rejectBtn">Reject</button>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 
   <script>
-    let selectedPaymentId = Number(new URLSearchParams(window.location.search).get("payment_id")) || null;
-    let currentStatusFilter = "pending";
+    const queryPaymentId = Number(new URLSearchParams(window.location.search).get("payment_id")) || null;
+
+    const state = {
+      activeTab: queryPaymentId ? "payments" : "home",
+      selectedPaymentId: queryPaymentId,
+      selectedUserId: null,
+      users: [],
+      payments: [],
+      pendingPayments: [],
+      stats: {},
+      usersSearch: "",
+      usersStatus: "all",
+      paymentsSearch: "",
+      paymentsStatus: "all",
+    };
 
     async function api(path, options = {}) {
       const headers = {
@@ -219,179 +414,332 @@
       return `status-${status}`;
     }
 
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
     function formatUsername(value) {
       if (!value) return "-";
       return `@${value}`;
     }
 
-    function renderStats(stats) {
+    function switchTab(tab) {
+      state.activeTab = tab;
+      document.querySelectorAll(".tab-btn").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.tab === tab);
+      });
+      document.querySelectorAll(".section").forEach((section) => {
+        section.classList.toggle("active", section.id === `section-${tab}`);
+      });
+    }
+
+    function renderStats() {
       const holder = document.getElementById("stats");
       holder.innerHTML = "";
-      Object.entries(stats).forEach(([key, value]) => {
-        const item = document.createElement("span");
-        item.className = "card";
-        item.style.padding = "6px 10px";
-        item.style.borderRadius = "10px";
-        item.innerHTML = `<strong>${key}</strong>: ${value}`;
+      Object.entries(state.stats || {}).forEach(([key, value]) => {
+        const item = document.createElement("div");
+        item.className = "stat-item";
+        item.innerHTML = `
+          <div class="label">${escapeHtml(key)}</div>
+          <div class="value">${escapeHtml(value)}</div>
+        `;
         holder.appendChild(item);
       });
     }
 
-    function renderPayments(payments) {
+    function renderPendingHome() {
+      const body = document.getElementById("pendingBody");
+      body.innerHTML = "";
+
+      if (!state.pendingPayments.length) {
+        body.innerHTML = `<tr><td colspan="4" class="muted">No pending payments.</td></tr>`;
+        return;
+      }
+
+      state.pendingPayments.forEach((payment) => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${payment.id}</td>
+          <td>${escapeHtml(payment.full_name)}<br><span class="muted">${escapeHtml(formatUsername(payment.username))} | ${payment.user_id}</span></td>
+          <td class="mono">${escapeHtml(payment.created_at)}</td>
+          <td><button data-open-payment="${payment.id}">Review</button></td>
+        `;
+        body.appendChild(row);
+      });
+
+      body.querySelectorAll("button[data-open-payment]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          state.selectedPaymentId = Number(btn.dataset.openPayment);
+          switchTab("payments");
+          renderPayments();
+          loadPaymentDetail();
+        });
+      });
+    }
+
+    function getFilteredUsers() {
+      const query = state.usersSearch.trim().toLowerCase();
+      return state.users.filter((user) => {
+        if (state.usersStatus !== "all" && user.subscription_status !== state.usersStatus) {
+          return false;
+        }
+
+        if (!query) return true;
+        const haystack = [
+          user.user_id,
+          user.full_name,
+          user.username,
+          user.subscription_status,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        return haystack.includes(query);
+      });
+    }
+
+    function renderUsers() {
+      const users = getFilteredUsers();
+      document.getElementById("usersCount").textContent = `Shown: ${users.length}`;
+
+      const body = document.getElementById("usersBody");
+      body.innerHTML = "";
+
+      if (!users.length) {
+        body.innerHTML = `<tr><td colspan="5" class="muted">No users found.</td></tr>`;
+        return;
+      }
+
+      users.forEach((user) => {
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${user.user_id}</td>
+          <td>${escapeHtml(user.full_name)}</td>
+          <td>${escapeHtml(formatUsername(user.username))}</td>
+          <td>${escapeHtml(user.subscription_status)}</td>
+          <td><button data-user-id="${user.user_id}">Open</button></td>
+        `;
+        body.appendChild(row);
+      });
+
+      body.querySelectorAll("button[data-user-id]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const userId = Number(btn.dataset.userId);
+          state.selectedUserId = userId;
+          loadUserProfile(userId);
+        });
+      });
+    }
+
+    async function loadUserProfile(userId) {
+      try {
+        setStatus(`Loading user profile ${userId}...`);
+        const [dialog, payments] = await Promise.all([
+          api(`/api/users/${userId}/dialog`),
+          api(`/api/users/${userId}/payments`),
+        ]);
+
+        const user = state.users.find((item) => item.user_id === userId);
+        const detail = document.getElementById("userDetail");
+        if (!user) {
+          detail.innerHTML = `<p class="muted">User ${userId} not found in cache.</p>`;
+        } else {
+          detail.innerHTML = `
+            <p><strong>ID:</strong> ${user.user_id}</p>
+            <p><strong>Name:</strong> ${escapeHtml(user.full_name)}</p>
+            <p><strong>Username:</strong> ${escapeHtml(formatUsername(user.username))}</p>
+            <p><strong>Status:</strong> ${escapeHtml(user.subscription_status)}</p>
+            <p><strong>Subscription until:</strong> <span class="mono">${escapeHtml(user.subscription_end_at || "-")}</span></p>
+          `;
+        }
+
+        const dialogsRoot = document.getElementById("dialogs");
+        dialogsRoot.innerHTML = "";
+        if (!dialog.length) {
+          dialogsRoot.innerHTML = `<div class="muted">Dialog is empty.</div>`;
+        } else {
+          dialog.forEach((entry) => {
+            const div = document.createElement("div");
+            div.className = "msg";
+            div.innerHTML = `
+              <div class="head">${escapeHtml(String(entry.direction).toUpperCase())} | ${escapeHtml(entry.created_at)}</div>
+              <div>${escapeHtml(entry.message_text)}</div>
+            `;
+            dialogsRoot.appendChild(div);
+          });
+        }
+
+        const paymentsBody = document.getElementById("userPaymentsBody");
+        paymentsBody.innerHTML = "";
+        if (!payments.length) {
+          paymentsBody.innerHTML = `<tr><td colspan="4" class="muted">This user has no transactions.</td></tr>`;
+        } else {
+          payments.forEach((payment) => {
+            const row = document.createElement("tr");
+            row.innerHTML = `
+              <td>${payment.id}</td>
+              <td><span class="${statusClass(payment.status)}">${escapeHtml(payment.status)}</span></td>
+              <td class="mono">${escapeHtml(payment.created_at)}</td>
+              <td><button data-user-payment-id="${payment.id}">Open</button></td>
+            `;
+            paymentsBody.appendChild(row);
+          });
+
+          paymentsBody.querySelectorAll("button[data-user-payment-id]").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              state.selectedPaymentId = Number(btn.dataset.userPaymentId);
+              switchTab("payments");
+              renderPayments();
+              loadPaymentDetail();
+            });
+          });
+        }
+
+        setStatus(`User profile ${userId} loaded`);
+      } catch (err) {
+        setStatus(`Failed to load profile: ${err.message}`);
+      }
+    }
+
+    function getFilteredPayments() {
+      const query = state.paymentsSearch.trim().toLowerCase();
+      return state.payments.filter((payment) => {
+        if (state.paymentsStatus !== "all" && payment.status !== state.paymentsStatus) {
+          return false;
+        }
+
+        if (!query) return true;
+        const haystack = [
+          payment.id,
+          payment.user_id,
+          payment.full_name,
+          payment.username,
+          payment.caption,
+          payment.status,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+
+        return haystack.includes(query);
+      });
+    }
+
+    function renderPayments() {
+      const payments = getFilteredPayments();
+      document.getElementById("paymentsCount").textContent = `Shown: ${payments.length}`;
+
       const body = document.getElementById("paymentsBody");
       body.innerHTML = "";
+
+      if (!payments.length) {
+        body.innerHTML = `<tr><td colspan="5" class="muted">No payments found.</td></tr>`;
+        return;
+      }
 
       payments.forEach((payment) => {
         const row = document.createElement("tr");
         row.innerHTML = `
           <td>${payment.id}</td>
-          <td>
-            ${payment.full_name}<br />
-            <span class="muted">${formatUsername(payment.username)} | ${payment.user_id}</span>
-          </td>
-          <td><span class="${statusClass(payment.status)}">${payment.status}</span></td>
-          <td class="mono">${payment.created_at}</td>
-          <td><button data-payment-id="${payment.id}">Открыть</button></td>
+          <td>${escapeHtml(payment.full_name)}<br><span class="muted">${escapeHtml(formatUsername(payment.username))} | ${payment.user_id}</span></td>
+          <td><span class="${statusClass(payment.status)}">${escapeHtml(payment.status)}</span></td>
+          <td class="mono">${escapeHtml(payment.created_at)}</td>
+          <td><button data-payment-id="${payment.id}">Open</button></td>
         `;
         body.appendChild(row);
       });
 
       body.querySelectorAll("button[data-payment-id]").forEach((btn) => {
         btn.addEventListener("click", () => {
-          selectedPaymentId = Number(btn.dataset.paymentId);
+          state.selectedPaymentId = Number(btn.dataset.paymentId);
           loadPaymentDetail();
         });
       });
     }
 
-    function renderUsers(users) {
-      const body = document.getElementById("usersBody");
-      body.innerHTML = "";
-
-      users.forEach((user) => {
-        const row = document.createElement("tr");
-        row.innerHTML = `
-          <td>${user.user_id}</td>
-          <td>${user.full_name}</td>
-          <td>${formatUsername(user.username)}</td>
-          <td>${user.subscription_status}</td>
-          <td><button data-user-id="${user.user_id}">Открыть</button></td>
-        `;
-        body.appendChild(row);
-      });
-
-      body.querySelectorAll("button[data-user-id]").forEach((btn) => {
-        btn.addEventListener("click", () => loadUserDialog(Number(btn.dataset.userId)));
-      });
-    }
-
-    async function loadOverview() {
-      try {
-        setStatus("Загрузка данных...");
-        const data = await api("/api/overview");
-        renderStats(data.stats || {});
-        renderUsers(data.users || []);
-        if (currentStatusFilter === "pending") {
-          renderPayments(data.pending_payments || []);
-        } else {
-          await loadPayments("all", false);
-        }
-
-        setStatus("Данные обновлены");
-      } catch (err) {
-        setStatus(`Ошибка: ${err.message}`);
-      }
-    }
-
-    async function loadPayments(filter = "pending", withStatus = true) {
-      currentStatusFilter = filter;
-      try {
-        const url = withStatus ? `/api/payments?status=${encodeURIComponent(filter)}` : "/api/payments";
-        const payments = await api(url);
-        renderPayments(payments);
-      } catch (err) {
-        setStatus(`Ошибка загрузки платежей: ${err.message}`);
-      }
-    }
-
     async function loadPaymentDetail() {
-      if (!selectedPaymentId) {
-        document.getElementById("paymentDetail").textContent = "Платеж не выбран";
+      const approveBtn = document.getElementById("approveBtn");
+      const rejectBtn = document.getElementById("rejectBtn");
+
+      if (!state.selectedPaymentId) {
+        document.getElementById("paymentDetail").textContent = "No payment selected";
+        approveBtn.disabled = true;
+        rejectBtn.disabled = true;
         return;
       }
 
       try {
-        const payment = await api(`/api/payments/${selectedPaymentId}`);
+        const payment = await api(`/api/payments/${state.selectedPaymentId}`);
+        const receiptUrl = `/api/payments/${state.selectedPaymentId}/receipt`;
+        const fallbackId = `receipt-fallback-${payment.id}`;
+
         document.getElementById("paymentDetail").innerHTML = `
           <p><strong>ID:</strong> ${payment.id}</p>
-          <p><strong>User:</strong> ${payment.full_name} (${formatUsername(payment.username)})</p>
+          <p><strong>User:</strong> ${escapeHtml(payment.full_name)} (${escapeHtml(formatUsername(payment.username))})</p>
           <p><strong>User ID:</strong> ${payment.user_id}</p>
-          <p><strong>Status:</strong> <span class="${statusClass(payment.status)}">${payment.status}</span></p>
-          <p><strong>Type:</strong> ${payment.file_type}</p>
-          <p><strong>Caption:</strong> ${payment.caption || "-"}</p>
-          <p><strong>Created:</strong> <span class="mono">${payment.created_at}</span></p>
-          <p><strong>File ID:</strong> <span class="mono">${payment.file_id}</span></p>
+          <p><strong>Status:</strong> <span class="${statusClass(payment.status)}">${escapeHtml(payment.status)}</span></p>
+          <p><strong>Type:</strong> ${escapeHtml(payment.file_type)}</p>
+          <p><strong>Caption:</strong> ${escapeHtml(payment.caption || "-")}</p>
+          <p><strong>Created:</strong> <span class="mono">${escapeHtml(payment.created_at)}</span></p>
+          <p><strong>File ID:</strong> <span class="mono">${escapeHtml(payment.file_id)}</span></p>
+          <p><strong>Receipt:</strong> <a href="${receiptUrl}" target="_blank" rel="noopener">Open file</a></p>
+          <img
+            class="receipt-preview"
+            src="${receiptUrl}"
+            alt="Receipt ${payment.id}"
+            onerror="this.classList.add('hidden'); document.getElementById('${fallbackId}').classList.remove('hidden');"
+          />
+          <p id="${fallbackId}" class="muted hidden">Preview is not available for this file type. Open the receipt using the link above.</p>
         `;
-      } catch (err) {
-        setStatus(`Ошибка деталей платежа: ${err.message}`);
-      }
-    }
 
-    async function loadUserDialog(userId) {
-      try {
-        document.getElementById("dialogUser").textContent = `User ID: ${userId}`;
-        const dialog = await api(`/api/users/${userId}/dialog`);
-        const root = document.getElementById("dialogs");
-        root.innerHTML = "";
-
-        dialog.forEach((entry) => {
-          const div = document.createElement("div");
-          div.className = "msg";
-          div.innerHTML = `
-            <div class="head">${entry.direction.toUpperCase()} | ${entry.created_at}</div>
-            <div>${entry.message_text}</div>
-          `;
-          root.appendChild(div);
-        });
+        const isPending = payment.status === "pending";
+        approveBtn.disabled = !isPending;
+        rejectBtn.disabled = !isPending;
       } catch (err) {
-        setStatus(`Ошибка загрузки диалога: ${err.message}`);
+        setStatus(`Payment details error: ${err.message}`);
       }
     }
 
     async function approvePayment() {
-      if (!selectedPaymentId) {
-        alert("Выберите платеж");
+      if (!state.selectedPaymentId) {
+        alert("Select a payment");
         return;
       }
 
       try {
-        await api(`/api/payments/${selectedPaymentId}/approve`, { method: "POST", body: "{}" });
-        setStatus(`Платеж ${selectedPaymentId} подтвержден`);
-        await loadOverview();
+        await api(`/api/payments/${state.selectedPaymentId}/approve`, { method: "POST", body: "{}" });
+        setStatus(`Payment ${state.selectedPaymentId} approved`);
+        await loadData();
         await loadPaymentDetail();
       } catch (err) {
-        setStatus(`Ошибка подтверждения: ${err.message}`);
+        setStatus(`Approval error: ${err.message}`);
       }
     }
 
     async function rejectPayment() {
-      if (!selectedPaymentId) {
-        alert("Выберите платеж");
+      if (!state.selectedPaymentId) {
+        alert("Select a payment");
         return;
       }
 
-      const reason = prompt("Причина отклонения", "Нечеткий скриншот") || "No reason provided";
+      const reason = prompt("Rejection reason", "Blurred screenshot") || "No reason provided";
 
       try {
-        await api(`/api/payments/${selectedPaymentId}/reject`, {
+        await api(`/api/payments/${state.selectedPaymentId}/reject`, {
           method: "POST",
           body: JSON.stringify({ reason }),
         });
-        setStatus(`Платеж ${selectedPaymentId} отклонен`);
-        await loadOverview();
+        setStatus(`Payment ${state.selectedPaymentId} rejected`);
+        await loadData();
         await loadPaymentDetail();
       } catch (err) {
-        setStatus(`Ошибка отклонения: ${err.message}`);
+        setStatus(`Rejection error: ${err.message}`);
       }
     }
 
@@ -400,18 +748,76 @@
       window.location.href = "/admin/login";
     }
 
-    document.getElementById("refreshBtn").addEventListener("click", () => loadOverview());
-    document.getElementById("showPending").addEventListener("click", () => loadPayments("pending", true));
-    document.getElementById("showAll").addEventListener("click", () => loadPayments("all", false));
-    document.getElementById("approveBtn").addEventListener("click", approvePayment);
-    document.getElementById("rejectBtn").addEventListener("click", rejectPayment);
+    async function loadData() {
+      try {
+        setStatus("Loading data...");
+        const [overview, payments] = await Promise.all([
+          api("/api/overview"),
+          api("/api/payments"),
+        ]);
+
+        state.stats = overview.stats || {};
+        state.users = overview.users || [];
+        state.pendingPayments = overview.pending_payments || [];
+        state.payments = payments || [];
+
+        renderStats();
+        renderPendingHome();
+        renderUsers();
+        renderPayments();
+
+        if (state.selectedPaymentId) {
+          await loadPaymentDetail();
+        }
+        if (state.selectedUserId) {
+          await loadUserProfile(state.selectedUserId);
+        }
+
+        setStatus("Data refreshed");
+      } catch (err) {
+        setStatus(`Error: ${err.message}`);
+      }
+    }
+
+    document.getElementById("tabs").addEventListener("click", (event) => {
+      const btn = event.target.closest("button[data-tab]");
+      if (!btn) return;
+      switchTab(btn.dataset.tab);
+    });
+
+    document.getElementById("goUsers").addEventListener("click", () => switchTab("users"));
+    document.getElementById("goPayments").addEventListener("click", () => switchTab("payments"));
+
+    document.getElementById("refreshBtn").addEventListener("click", () => loadData());
     document.getElementById("logoutBtn").addEventListener("click", logout);
 
-    loadOverview().then(() => {
-      if (selectedPaymentId) {
-        loadPaymentDetail();
-      }
+    document.getElementById("approveBtn").addEventListener("click", approvePayment);
+    document.getElementById("rejectBtn").addEventListener("click", rejectPayment);
+    document.getElementById("approveBtn").disabled = true;
+    document.getElementById("rejectBtn").disabled = true;
+
+    document.getElementById("usersSearch").addEventListener("input", (event) => {
+      state.usersSearch = event.target.value;
+      renderUsers();
     });
+
+    document.getElementById("usersStatusFilter").addEventListener("change", (event) => {
+      state.usersStatus = event.target.value;
+      renderUsers();
+    });
+
+    document.getElementById("paymentsSearch").addEventListener("input", (event) => {
+      state.paymentsSearch = event.target.value;
+      renderPayments();
+    });
+
+    document.getElementById("paymentsStatusFilter").addEventListener("change", (event) => {
+      state.paymentsStatus = event.target.value;
+      renderPayments();
+    });
+
+    switchTab(state.activeTab);
+    loadData();
   </script>
 </body>
 </html>

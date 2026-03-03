@@ -1,5 +1,5 @@
 ﻿<!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -89,15 +89,15 @@
 <body>
   <div class="card">
     <h1>Admin Login</h1>
-    <p>Введите логин и пароль администратора.</p>
+    <p>Enter admin username and password.</p>
 
-    <label for="username">Логин</label>
+    <label for="username">Username</label>
     <input id="username" autocomplete="username" />
 
-    <label for="password">Пароль</label>
+    <label for="password">Password</label>
     <input id="password" type="password" autocomplete="current-password" />
 
-    <button id="loginBtn">Войти</button>
+    <button id="loginBtn">Sign in</button>
     <div class="error" id="error"></div>
   </div>
 
@@ -112,7 +112,7 @@
       errorEl.textContent = "";
 
       if (!username || !password) {
-        errorEl.textContent = "Заполните логин и пароль";
+        errorEl.textContent = "Enter username and password";
         return;
       }
 
@@ -132,7 +132,7 @@
         const data = await response.json();
         window.location.href = data.redirect_to || "/admin";
       } catch (err) {
-        errorEl.textContent = "Неверный логин или пароль";
+        errorEl.textContent = "Invalid username or password";
       }
     }
 

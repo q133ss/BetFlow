@@ -20,7 +20,7 @@ from . import texts
 
 def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("subscribe", callback_data="subscribe")]]
+        [[InlineKeyboardButton("Subscribe", callback_data="subscribe")]]
     )
 
 
@@ -85,6 +85,12 @@ async def send_and_log(
     await db.log_dialog(user_id, "out", text)
 
 
+def _truncate(value: str, limit: int) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: max(0, limit - 1)] + "…"
+
+
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     db: Database = context.application.bot_data["db"]
     user_id = await ensure_user(update, db)
@@ -146,7 +152,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     if query.data == "cancel":
         await db.clear_awaiting_receipt(user_id)
-        msg = "Subscription flow canceled. Use /subscribe when you're ready."
+        msg = "Subscription flow canceled. Send /subscribe when you're ready."
         await send_and_log(context, db, user_id, msg, reply_markup=start_keyboard())
         return
 
@@ -201,6 +207,15 @@ async def receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         )
         return
 
+    if not file_id:
+        await send_and_log(
+            context,
+            db,
+            user_id,
+            "Could not read the receipt. Please send it as a photo or document.",
+        )
+        return
+
     payment_id = await db.create_payment(
         user_id=user_id,
         file_id=file_id,
@@ -211,14 +226,18 @@ async def receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     await send_and_log(context, db, user_id, texts.RECEIPT_ACCEPTED_TEXT)
 
+    admin_url = f"{settings.public_admin_url}/admin?payment_id={payment_id}"
+    receipt_text = _truncate(caption or "Not provided", 400)
     admin_caption = (
-        "Новая заявка на оплату\n\n"
-        f"Платеж ID: {payment_id}\n"
-        f"Пользователь: {user.get('full_name')}\n"
+        "New payment request.\n\n"
+        f"Payment ID: {payment_id}\n"
+        f"User: {user.get('full_name')}\n"
         f"Username: {('@' + user.get('username')) if user.get('username') else '-'}\n"
         f"User ID: {user_id}\n\n"
-        "Откройте приложение для проверки."
+        f"Admin panel link: {admin_url}\n\n"
+        f"Receipt text:\n{receipt_text}"
     )
+    admin_markup = InlineKeyboardMarkup([[InlineKeyboardButton("Open admin panel", url=admin_url)]])
 
     try:
         if file_type == "photo":
@@ -233,18 +252,27 @@ async def receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
                 document=file_id,
                 caption=admin_caption,
             )
-
-        admin_url = f"{settings.public_admin_url}/admin?payment_id={payment_id}"
-        await context.bot.send_message(
-            chat_id=settings.admin_telegram_id,
-            text="Поступил новый чек на проверку.",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("Открыть приложение", url=admin_url)]]
-            ),
-        )
-    except Exception:
+        try:
+            await context.bot.send_message(
+                chat_id=settings.admin_telegram_id,
+                text=f"Open admin panel: {admin_url}",
+                reply_markup=admin_markup,
+                disable_web_page_preview=True,
+            )
+        except Exception as btn_exc:
+            print(
+                f"WARNING: failed to send admin panel button for payment {payment_id}: {btn_exc}"
+            )
+            await context.bot.send_message(
+                chat_id=settings.admin_telegram_id,
+                text=f"Open admin panel: {admin_url}",
+                disable_web_page_preview=True,
+            )
+        await db.log_dialog(user_id, "system", f"admin_notified:payment_id={payment_id}")
+    except Exception as exc:
         # Avoid breaking receipt flow if admin notification fails.
-        pass
+        print(f"ERROR: failed to notify admin for payment {payment_id}: {exc}")
+        await db.log_dialog(user_id, "system", f"admin_notify_failed:payment_id={payment_id};error={exc}")
 
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -277,9 +305,7 @@ def build_bot_application(settings: Settings, db: Database) -> Application:
     app.add_handler(CommandHandler("subscribe", subscribe_handler))
     app.add_handler(CommandHandler("info", info_handler))
     app.add_handler(CallbackQueryHandler(button_handler))
-    app.add_handler(
-        MessageHandler((filters.PHOTO | filters.Document.ALL) & (~filters.COMMAND), receipt_handler)
-    )
+    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL, receipt_handler))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), text_handler))
 
     return app

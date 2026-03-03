@@ -1,11 +1,12 @@
 ﻿from __future__ import annotations
 
 import hmac
+import mimetypes
 from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 from telegram import Bot
@@ -117,6 +118,10 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
     async def user_dialog(user_id: int, _: dict[str, Any] = Depends(require_admin)) -> list[dict[str, Any]]:
         return await db.get_dialog(user_id=user_id, limit=500)
 
+    @app.get("/api/users/{user_id}/payments")
+    async def user_payments(user_id: int, _: dict[str, Any] = Depends(require_admin)) -> list[dict[str, Any]]:
+        return await db.list_user_payments(user_id=user_id, limit=500)
+
     @app.get("/api/payments")
     async def payments(
         status: str | None = Query(default=None),
@@ -132,6 +137,31 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
         if not data:
             raise HTTPException(status_code=404, detail="Payment not found")
         return data
+
+    @app.get("/api/payments/{payment_id}/receipt")
+    async def payment_receipt(
+        payment_id: int,
+        _: dict[str, Any] = Depends(require_admin),
+    ) -> Response:
+        data = await db.get_payment(payment_id)
+        if not data:
+            raise HTTPException(status_code=404, detail="Payment not found")
+
+        try:
+            tg_file = await bot.get_file(str(data["file_id"]))
+            payload = await tg_file.download_as_bytearray()
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Failed to load receipt: {exc}") from exc
+
+        file_path = tg_file.file_path or ""
+        media_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+        filename = Path(file_path).name if file_path else f"payment-{payment_id}"
+
+        return Response(
+            content=bytes(payload),
+            media_type=media_type,
+            headers={"Content-Disposition": 'inline; filename="{}"'.format(filename)},
+        )
 
     @app.post("/api/payments/{payment_id}/approve")
     async def approve(payment_id: int, admin: dict[str, Any] = Depends(require_admin)) -> dict[str, Any]:
