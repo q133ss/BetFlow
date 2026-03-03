@@ -6,7 +6,7 @@ import contextlib
 from dotenv import load_dotenv
 import uvicorn
 
-from .bot import build_bot_application
+from .bot import build_bot_application, subscription_expiry_loop
 from .admin_web import create_fastapi_app
 from .config import Settings
 from .db import Database
@@ -32,10 +32,11 @@ async def run() -> None:
 
     server_task = asyncio.create_task(server.serve())
     bot_task = None
+    expiry_task = None
 
     async def start_bot() -> None:
         try:
-            nonlocal bot_initialized, bot_started, bot_polling
+            nonlocal bot_initialized, bot_started, bot_polling, expiry_task
             try:
                 await telegram_app.initialize()
                 bot_initialized = True
@@ -43,6 +44,7 @@ async def run() -> None:
                 bot_started = True
                 await telegram_app.updater.start_polling()
                 bot_polling = True
+                expiry_task = asyncio.create_task(subscription_expiry_loop(telegram_app))
             except Exception as exc:
                 print(f"WARNING: Telegram bot failed to start, admin web is still available: {exc}")
                 return
@@ -58,6 +60,10 @@ async def run() -> None:
             bot_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await bot_task
+        if expiry_task:
+            expiry_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await expiry_task
         if bot_polling:
             await telegram_app.updater.stop()
         if bot_started:

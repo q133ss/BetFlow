@@ -7,13 +7,14 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, RedirectResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 from telegram import Bot
 
 from . import texts
 from .config import Settings
 from .db import Database
+from .membership import ban_user_from_chats, unban_user_in_chats
 
 
 class RejectPayload(BaseModel):
@@ -24,6 +25,15 @@ class LoginPayload(BaseModel):
     username: str
     password: str
     payment_id: int | None = None
+
+
+class CancelSubscriptionPayload(BaseModel):
+    reason: str | None = None
+
+
+class AssignSubscriptionPayload(BaseModel):
+    days: int = Field(default=30, ge=1, le=3650)
+    reason: str | None = None
 
 
 def _is_authenticated(request: Request) -> bool:
@@ -122,6 +132,92 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
     async def user_payments(user_id: int, _: dict[str, Any] = Depends(require_admin)) -> list[dict[str, Any]]:
         return await db.list_user_payments(user_id=user_id, limit=500)
 
+    @app.post("/api/users/{user_id}/cancel-subscription")
+    async def cancel_subscription(
+        user_id: int,
+        payload: CancelSubscriptionPayload,
+        admin: dict[str, Any] = Depends(require_admin),
+    ) -> dict[str, Any]:
+        reason = (payload.reason or "Canceled by admin").strip()
+        user = await db.cancel_subscription_by_admin(user_id=user_id)
+        if not user:
+            raise HTTPException(status_code=400, detail="User not found or subscription already inactive")
+
+        removed: list[int] = []
+        failed: dict[int, str] = {}
+        if settings.managed_chat_ids:
+            removed, failed = await ban_user_from_chats(
+                bot=bot,
+                chat_ids=settings.managed_chat_ids,
+                user_id=user_id,
+            )
+
+        message = texts.CANCELED_BY_ADMIN_TEMPLATE.format(reason=reason)
+        try:
+            await bot.send_message(chat_id=user_id, text=message, disable_web_page_preview=True)
+            await db.log_dialog(user_id, "out", message)
+        except Exception as exc:
+            await db.log_dialog(
+                user_id,
+                "system",
+                f"cancel_subscription_notify_failed:user_id={user_id};error={exc}"[:4000],
+            )
+
+        await db.log_dialog(
+            user_id,
+            "system",
+            (
+                f"subscription_canceled_by_admin:admin_id={admin['id']};reason={reason};"
+                f"removed={','.join(str(chat_id) for chat_id in removed) if removed else '-'};"
+                f"failed={';'.join(f'{chat_id}:{error}' for chat_id, error in failed.items()) if failed else '-'}"
+            )[:4000],
+        )
+        return {"ok": True, "user": user, "removed_from_chats": removed, "failed_chats": failed}
+
+    @app.post("/api/users/{user_id}/assign-subscription")
+    async def assign_subscription(
+        user_id: int,
+        payload: AssignSubscriptionPayload,
+        admin: dict[str, Any] = Depends(require_admin),
+    ) -> dict[str, Any]:
+        reason = (payload.reason or "Assigned by admin").strip()
+        user = await db.assign_subscription_by_admin(user_id=user_id, days=payload.days)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        unbanned: list[int] = []
+        failed_unban: dict[int, str] = {}
+        if settings.managed_chat_ids:
+            unbanned, failed_unban = await unban_user_in_chats(
+                bot=bot,
+                chat_ids=settings.managed_chat_ids,
+                user_id=user_id,
+            )
+
+        message = texts.ASSIGNED_BY_ADMIN_TEMPLATE.format(days=payload.days, premium_link=settings.premium_folder_link)
+        try:
+            await bot.send_message(chat_id=user_id, text=message, disable_web_page_preview=False)
+            await db.log_dialog(user_id, "out", message)
+        except Exception as exc:
+            await db.log_dialog(
+                user_id,
+                "system",
+                f"assign_subscription_notify_failed:user_id={user_id};error={exc}"[:4000],
+            )
+
+        await db.log_dialog(
+            user_id,
+            "system",
+            (
+                f"subscription_assigned_by_admin:admin_id={admin['id']};days={payload.days};reason={reason};"
+                f"subscription_end_at={user.get('subscription_end_at') or '-'};"
+                f"unbanned={','.join(str(chat_id) for chat_id in unbanned) if unbanned else '-'};"
+                f"failed={';'.join(f'{chat_id}:{error}' for chat_id, error in failed_unban.items()) if failed_unban else '-'}"
+            )[:4000],
+        )
+
+        return {"ok": True, "user": user, "unbanned_chats": unbanned, "failed_unban": failed_unban}
+
     @app.get("/api/payments")
     async def payments(
         status: str | None = Query(default=None),
@@ -170,6 +266,21 @@ def create_fastapi_app(settings: Settings, db: Database, bot: Bot) -> FastAPI:
             raise HTTPException(status_code=400, detail="Payment already processed or missing")
 
         user_id = int(reviewed["user_id"])
+        if settings.managed_chat_ids:
+            unbanned, failed_unban = await unban_user_in_chats(
+                bot=bot,
+                chat_ids=settings.managed_chat_ids,
+                user_id=user_id,
+            )
+            await db.log_dialog(
+                user_id,
+                "system",
+                (
+                    f"subscription_reactivated_unban:unbanned={','.join(str(chat_id) for chat_id in unbanned) if unbanned else '-'};"
+                    f"failed={';'.join(f'{chat_id}:{error}' for chat_id, error in failed_unban.items()) if failed_unban else '-'}"
+                )[:4000],
+            )
+
         message = texts.APPROVED_TEMPLATE.format(premium_link=settings.premium_folder_link)
         await bot.send_message(
             chat_id=user_id,

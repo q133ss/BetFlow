@@ -191,6 +191,105 @@ class Database:
             rows = await cur.fetchall()
         return [dict(row) for row in rows]
 
+    async def list_expired_subscriptions(self, now_iso: str, limit: int = 200) -> list[dict[str, Any]]:
+        assert self._db is not None
+        async with self._db.execute(
+            """
+            SELECT user_id, full_name, username, subscription_end_at
+            FROM users
+            WHERE subscription_status = 'subscribed'
+              AND subscription_end_at IS NOT NULL
+              AND subscription_end_at <= ?
+            ORDER BY subscription_end_at ASC
+            LIMIT ?
+            """,
+            (now_iso, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(row) for row in rows]
+
+    async def deactivate_subscription(self, user_id: int) -> bool:
+        assert self._db is not None
+        async with self._lock:
+            await self._db.execute(
+                """
+                UPDATE users
+                SET subscription_status = 'not_subscribed',
+                    awaiting_receipt_until = NULL
+                WHERE user_id = ? AND subscription_status = 'subscribed'
+                """,
+                (user_id,),
+            )
+            await self._db.commit()
+            async with self._db.execute(
+                "SELECT subscription_status FROM users WHERE user_id = ?",
+                (user_id,),
+            ) as cur:
+                row = await cur.fetchone()
+        return bool(row and row["subscription_status"] == "not_subscribed")
+
+    async def cancel_subscription_by_admin(self, user_id: int) -> dict[str, Any] | None:
+        assert self._db is not None
+        async with self._lock:
+            async with self._db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cur:
+                row = await cur.fetchone()
+            if not row or row["subscription_status"] != "subscribed":
+                return None
+
+            now_iso = utcnow().isoformat()
+            await self._db.execute(
+                """
+                UPDATE users
+                SET subscription_status = 'not_subscribed',
+                    subscription_end_at = ?,
+                    awaiting_receipt_until = NULL
+                WHERE user_id = ?
+                """,
+                (now_iso, user_id),
+            )
+            await self._db.commit()
+
+        return await self.get_user(user_id)
+
+    async def assign_subscription_by_admin(self, user_id: int, days: int = 30) -> dict[str, Any] | None:
+        assert self._db is not None
+        now = utcnow()
+        now_iso = now.isoformat()
+
+        async with self._lock:
+            async with self._db.execute("SELECT * FROM users WHERE user_id = ?", (user_id,)) as cur:
+                user_row = await cur.fetchone()
+            if not user_row:
+                return None
+
+            current_end = user_row["subscription_end_at"]
+            if current_end:
+                try:
+                    current_end_dt = datetime.fromisoformat(current_end)
+                    base = current_end_dt if current_end_dt > now else now
+                except ValueError:
+                    base = now
+            else:
+                base = now
+
+            new_end = base + timedelta(days=days)
+            start_at = user_row["subscription_start_at"] or now_iso
+
+            await self._db.execute(
+                """
+                UPDATE users
+                SET subscription_status = 'subscribed',
+                    subscription_start_at = ?,
+                    subscription_end_at = ?,
+                    awaiting_receipt_until = NULL
+                WHERE user_id = ?
+                """,
+                (start_at, new_end.isoformat(), user_id),
+            )
+            await self._db.commit()
+
+        return await self.get_user(user_id)
+
     async def approve_payment(self, payment_id: int, reviewed_by: int, days: int = 30) -> dict[str, Any] | None:
         assert self._db is not None
         now = utcnow()

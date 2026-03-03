@@ -299,6 +299,10 @@
         <div class="card">
           <h2>User Profile</h2>
           <div id="userDetail" class="muted">Select a user from the list.</div>
+          <div class="row" style="margin-top: 10px;">
+            <button class="secondary" id="assignSubBtn">Assign subscription</button>
+            <button class="danger" id="cancelSubBtn">Cancel subscription</button>
+          </div>
 
           <h3 style="margin-top: 16px;">Dialog</h3>
           <div class="msg-list" id="dialogs"></div>
@@ -549,6 +553,8 @@
         const detail = document.getElementById("userDetail");
         if (!user) {
           detail.innerHTML = `<p class="muted">User ${userId} not found in cache.</p>`;
+          document.getElementById("assignSubBtn").disabled = true;
+          document.getElementById("cancelSubBtn").disabled = true;
         } else {
           detail.innerHTML = `
             <p><strong>ID:</strong> ${user.user_id}</p>
@@ -557,6 +563,8 @@
             <p><strong>Status:</strong> ${escapeHtml(user.subscription_status)}</p>
             <p><strong>Subscription until:</strong> <span class="mono">${escapeHtml(user.subscription_end_at || "-")}</span></p>
           `;
+          document.getElementById("assignSubBtn").disabled = false;
+          document.getElementById("cancelSubBtn").disabled = user.subscription_status !== "subscribed";
         }
 
         const dialogsRoot = document.getElementById("dialogs");
@@ -603,7 +611,58 @@
 
         setStatus(`User profile ${userId} loaded`);
       } catch (err) {
+        document.getElementById("assignSubBtn").disabled = true;
+        document.getElementById("cancelSubBtn").disabled = true;
         setStatus(`Failed to load profile: ${err.message}`);
+      }
+    }
+
+    async function assignSubscription() {
+      if (!state.selectedUserId) {
+        alert("Select a user");
+        return;
+      }
+
+      const daysRaw = prompt("Subscription duration in days", "30");
+      if (daysRaw === null) {
+        return;
+      }
+
+      const days = Number(daysRaw);
+      if (!Number.isInteger(days) || days < 1 || days > 3650) {
+        alert("Days must be an integer between 1 and 3650");
+        return;
+      }
+
+      const reason = prompt("Assignment reason", "Assigned by admin") || "Assigned by admin";
+      try {
+        await api(`/api/users/${state.selectedUserId}/assign-subscription`, {
+          method: "POST",
+          body: JSON.stringify({ reason, days }),
+        });
+        setStatus(`Subscription for user ${state.selectedUserId} assigned for ${days} day(s)`);
+        await loadData();
+      } catch (err) {
+        setStatus(`Assign subscription error: ${err.message}`);
+      }
+    }
+
+    async function cancelSubscription() {
+      if (!state.selectedUserId) {
+        alert("Select a user");
+        return;
+      }
+
+      const reason = prompt("Cancellation reason", "Canceled by admin") || "Canceled by admin";
+      try {
+        await api(`/api/users/${state.selectedUserId}/cancel-subscription`, {
+          method: "POST",
+          body: JSON.stringify({ reason }),
+        });
+        setStatus(`Subscription for user ${state.selectedUserId} canceled`);
+        await loadData();
+      } catch (err) {
+        setStatus(`Cancel subscription error: ${err.message}`);
       }
     }
 
@@ -793,8 +852,12 @@
 
     document.getElementById("approveBtn").addEventListener("click", approvePayment);
     document.getElementById("rejectBtn").addEventListener("click", rejectPayment);
+    document.getElementById("assignSubBtn").addEventListener("click", assignSubscription);
+    document.getElementById("cancelSubBtn").addEventListener("click", cancelSubscription);
     document.getElementById("approveBtn").disabled = true;
     document.getElementById("rejectBtn").disabled = true;
+    document.getElementById("assignSubBtn").disabled = true;
+    document.getElementById("cancelSubBtn").disabled = true;
 
     document.getElementById("usersSearch").addEventListener("input", (event) => {
       state.usersSearch = event.target.value;

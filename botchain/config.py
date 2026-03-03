@@ -25,6 +25,8 @@ class Settings:
     db_path: str
     api_host: str
     api_port: int
+    managed_chat_ids: list[int]
+    subscription_sweep_seconds: int
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -45,6 +47,24 @@ class Settings:
         if not admin_session_secret:
             raise ValueError("ADMIN_SESSION_SECRET is required")
 
+        managed_chat_ids_raw = _getenv_clean("MANAGED_CHAT_IDS", "")
+        managed_chat_ids: list[int] = []
+        if managed_chat_ids_raw:
+            for chunk in managed_chat_ids_raw.split(","):
+                value = chunk.strip()
+                if not value:
+                    continue
+                try:
+                    managed_chat_ids.append(int(value))
+                except ValueError as exc:
+                    raise ValueError("MANAGED_CHAT_IDS must contain comma-separated integer chat ids") from exc
+
+        sweep_raw = _getenv_clean("SUBSCRIPTION_SWEEP_SECONDS", "60")
+        try:
+            subscription_sweep_seconds = max(30, int(sweep_raw))
+        except ValueError as exc:
+            raise ValueError("SUBSCRIPTION_SWEEP_SECONDS must be an integer") from exc
+
         return cls(
             telegram_bot_token=token,
             admin_telegram_id=int(admin_raw),
@@ -56,4 +76,6 @@ class Settings:
             db_path=_getenv_clean("DB_PATH", "./botchain.db"),
             api_host=_getenv_clean("API_HOST", "0.0.0.0"),
             api_port=int(_getenv_clean("API_PORT", "8080")),
+            managed_chat_ids=managed_chat_ids,
+            subscription_sweep_seconds=subscription_sweep_seconds,
         )

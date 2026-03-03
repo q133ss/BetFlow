@@ -35,3 +35,19 @@ REJECTED_TEMPLATE = """Payment was rejected. ❌
 Reason: {reason}
 
 Send /subscribe and upload a new receipt."""
+
+CANCELED_BY_ADMIN_TEMPLATE = """Your subscription was canceled by an admin.
+Reason: {reason}
+
+If this is unexpected, please contact support."""
+
+ASSIGNED_BY_ADMIN_TEMPLATE = """Subscription granted by admin. ✅
+Your access has been extended by {days} day(s).
+
+Premium link:
+{premium_link}"""
+
+SUBSCRIPTION_EXPIRED_TEMPLATE = """Your subscription has expired.
+Access to premium channels has been revoked.
+
+Send /subscribe to renew access."""

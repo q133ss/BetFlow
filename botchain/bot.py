@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
@@ -15,6 +16,7 @@ from telegram.ext import (
 
 from .config import Settings
 from .db import Database, utcnow
+from .membership import ban_user_from_chats
 from . import texts
 
 
@@ -293,6 +295,55 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         user_id,
         "Send /subscribe to buy access or /info to view your subscription details.",
     )
+
+
+def _format_chat_op_log(prefix: str, removed: list[int], failed: dict[int, str]) -> str:
+    removed_part = ",".join(str(chat_id) for chat_id in removed) if removed else "-"
+    failed_part = ";".join(f"{chat_id}:{error}" for chat_id, error in failed.items()) if failed else "-"
+    return f"{prefix};removed={removed_part};failed={failed_part}"[:4000]
+
+
+async def process_expired_subscriptions(app: Application) -> None:
+    db: Database = app.bot_data["db"]
+    settings: Settings = app.bot_data["settings"]
+
+    if not settings.managed_chat_ids:
+        return
+
+    expired = await db.list_expired_subscriptions(now_iso=utcnow().isoformat(), limit=200)
+    for user in expired:
+        user_id = int(user["user_id"])
+        removed, failed = await ban_user_from_chats(
+            bot=app.bot,
+            chat_ids=settings.managed_chat_ids,
+            user_id=user_id,
+        )
+        await db.deactivate_subscription(user_id)
+        await db.log_dialog(
+            user_id,
+            "system",
+            _format_chat_op_log("subscription_expired:auto", removed=removed, failed=failed),
+        )
+
+        try:
+            await app.bot.send_message(chat_id=user_id, text=texts.SUBSCRIPTION_EXPIRED_TEMPLATE)
+            await db.log_dialog(user_id, "out", texts.SUBSCRIPTION_EXPIRED_TEMPLATE)
+        except Exception as exc:
+            await db.log_dialog(
+                user_id,
+                "system",
+                f"subscription_expired_notify_failed:user_id={user_id};error={exc}"[:4000],
+            )
+
+
+async def subscription_expiry_loop(app: Application) -> None:
+    settings: Settings = app.bot_data["settings"]
+    while True:
+        try:
+            await process_expired_subscriptions(app)
+        except Exception as exc:
+            print(f"ERROR: subscription expiry sweep failed: {exc}")
+        await asyncio.sleep(settings.subscription_sweep_seconds)
 
 
 def build_bot_application(settings: Settings, db: Database) -> Application:
