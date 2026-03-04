@@ -54,6 +54,36 @@ docker compose up -d --build
 curl http://localhost:8080/health
 ```
 
+## 3) Команды для прод-хоста (Ubuntu + systemd)
+
+Подключение:
+
+```bash
+ssh root@89.169.39.62
+cd /var/www/html/BetFlow
+```
+
+После изменения `.env`:
+
+```bash
+sudo systemctl restart betflow
+sudo systemctl status betflow
+sudo journalctl -u betflow -n 100 --no-pager
+```
+
+Перезапуск Apache (только если меняли его конфиг):
+
+```bash
+sudo apache2ctl configtest
+sudo systemctl reload apache2
+```
+
+Полная перезагрузка хоста:
+
+```bash
+sudo reboot
+```
+
 ## .env параметры
 
 - `TELEGRAM_BOT_TOKEN` - токен бота
